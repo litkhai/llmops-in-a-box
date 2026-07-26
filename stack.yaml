@@ -47,7 +47,8 @@ phases:
     status: planned
     scope: >-
       MCP servers exposed to the gateway so tool-use is traced through the
-      same pipeline. Likely first server, ClickHouse Cloud.
+      same pipeline. First server is ClickHouse Cloud — settled, not a
+      shortlist.
     adds_layers: [tools]
     adds_models: []
   3:
@@ -59,12 +60,27 @@ phases:
     adds_layers: [serving]
     adds_models: [qwen-7b]
   4:
-    name: Storage and memory
+    name: Artifact storage
     status: planned
     scope: >-
-      MinIO for datasets/artifacts beyond the Langfuse blob store, plus
-      MemKV semantic caching and conversation memory.
-    adds_layers: [memory]
+      A MinIO AIStor instance for datasets, eval artifacts and model weights,
+      separate from the blob store Langfuse runs for its own event uploads.
+      AIStor Free covers a single node with no capacity limit, so this phase
+      carries no licence cost.
+    # Was [memory] only — `storage` was missing here while profiles.phase-4,
+    # README and the docs all listed both. Fixed; the layer is `storage`.
+    adds_layers: [storage]
+    adds_models: []
+  # The `memory` layer is deliberately NOT in any phase yet. See the layer
+  # definition below for why MemKV cannot be a container in this stack.
+  5:
+    name: Operating recipes
+    status: planned
+    scope: >-
+      No new layers. Context-based routing in LiteLLM, LibreChat Agents over
+      the Phase 2 MCP tools, and Langfuse evaluations — the things worth
+      doing once Phases 1-4 are up, each producing evidence in Langfuse.
+    adds_layers: []
     adds_models: []
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,10 +121,18 @@ profiles:
     description: "Phase 3 — Phase 2 plus self-hosted vLLM on RunPod"
     layers: [gateway, observability, ui, tools, serving]
 
-  # ── Phase 4 — add MinIO storage and MemKV memory/cache. ──
+  # ── Phase 4 — add the MinIO AIStor artifact store. ──
+  #    `memory` is intentionally absent: MemKV needs NVIDIA STX hardware and
+  #    cannot come up here. See layers.memory.
   phase-4:
-    description: "Phase 4 — Phase 3 plus MinIO storage and MemKV memory"
-    layers: [gateway, observability, ui, tools, serving, storage, memory]
+    description: "Phase 4 — Phase 3 plus the MinIO AIStor artifact store"
+    layers: [gateway, observability, ui, tools, serving, storage]
+
+  # ── Phase 5 — operating recipes. Same layers as Phase 4 by design: these
+  #    are things to *do* with the stack, not things to add to it. ──
+  phase-5:
+    description: "Phase 5 — Phase 4 plus operating recipes (no new layers)"
+    layers: [gateway, observability, ui, tools, serving, storage]
 
   # ── Convenience aliases, independent of phase ──
 
@@ -294,11 +318,19 @@ layers:
           scopes: [read_only]
 
   # ── Phase 4 — user-facing artifact store (distinct from Langfuse's blob
-  #    store above: datasets, eval artifacts, model weights) ──
+  #    store above: datasets, eval artifacts, model weights).
+  #
+  #    Licensing: MinIO AIStor Free is single-node with no artificial capacity
+  #    limit, and includes erasure coding and bitrot protection — so this whole
+  #    layer costs nothing at the scale this stack runs at. The threshold is
+  #    node count, not terabytes: going multi-node moves you to Enterprise Lite
+  #    (under 400 TiB) or Enterprise. Single node is the right scope for a
+  #    reference architecture that is explicitly not a production data
+  #    platform. ──
   storage:
     phase: 4
     enabled: false
-    impl: minio
+    impl: minio-aistor
     managed_by: compose
     compose_profile: storage
     port: 9011                  # console; API on 9012 — avoids the Langfuse
@@ -307,16 +339,44 @@ layers:
       api_port: 9012
       buckets: [datasets, artifacts, weights]
 
-  # ── Phase 4 — semantic cache / conversation memory ──
+  # ── NOT IN ANY PHASE — blocked on hardware. Read before enabling. ──
+  #
+  #  This layer was written as "MemKV semantic cache". That conflates two
+  #  different mechanisms, and MemKV is not the one described by the options
+  #  below.
+  #
+  #  What MemKV actually is (min.io/product/memkv): a purpose-built context
+  #  memory store for AI inference — a petascale, flash-backed pool for the
+  #  transformer KV cache. It moves attention key/value blocks from GPU memory
+  #  to NVMe over RDMA in 2-16 MB blocks, bypassing file system and object
+  #  protocols. It targets TTFT and TPOT, not response reuse.
+  #
+  #  What it requires: a single binary on NVIDIA STX-based systems, Vera CPUs,
+  #  Spectrum-X 800 GbE, PCIe Gen6. There is no compose service that stands
+  #  this up, and a single RunPod pod cannot host it. `managed_by: compose`,
+  #  `port: 9200` and the health check in observability.checks are all
+  #  therefore wrong; they are left in place rather than invented anew,
+  #  because the right fix is a decision, not an edit.
+  #
+  #  A semantic cache — embed the prompt, serve a stored response above a
+  #  similarity threshold — IS worth having and IS buildable here: LiteLLM
+  #  supports it natively with a Redis backend. It is a separate item from
+  #  MemKV, at a completely different scale, and should be declared as its
+  #  own layer rather than borrowing this one's name.
+  #
+  #  Left out of every phase and every profile until that split is decided.
   memory:
-    phase: 4
+    phase: null                 # was 4 — see above
     enabled: false
     impl: memkv
     managed_by: compose
     compose_profile: memory
     port: 9200
-    requires: [gateway]
+    requires: [gateway]         # wrong for KV-cache offload: it sits under
+                                # the inference engine, not beside the gateway
     options:
+      # These two describe a semantic cache, NOT MemKV. Kept verbatim so the
+      # mismatch stays visible instead of being quietly deleted.
       semantic_cache: true
       similarity_threshold: 0.95
 
@@ -455,6 +515,10 @@ health:
     - name: artifact-minio
       layer: storage
       url: http://{{host}}:9012/minio/health/live
+    # Placeholder, and known wrong — MemKV is not an HTTP service on this host.
+    # Left alongside the layer it belongs to rather than deleted, so the two
+    # get corrected together once the memory layer is resolved. See
+    # layers.memory.
     - name: memkv
       layer: memory
       url: http://{{host}}:9200/health

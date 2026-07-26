@@ -28,22 +28,27 @@ This repository is a **reference architecture + deployment scripts** that answer
 ├─ Serving ────────── vLLM                              Phase 3
 ├─ Models ─────────── Self-hosted (Qwen, EXAONE, ...)   Phase 3
 ├─ Compute ────────── RunPod / AWS                      Phase 3
-├─ Storage ────────── MinIO                             Phase 4
-└─ Memory / Cache ─── MemKV                             Phase 4
+└─ Storage ────────── MinIO AIStor (free at one node)   Phase 4
+
+   Operating recipes ─ context routing · agents · evals  Phase 5
+   (no new layers — things to do with the stack above)
 ```
 
 ---
 
 ## Build-out phases
 
-The stack is built **frontier-first**: get the gateway, tracing, and UI working against commercial APIs, then add tools, then self-hosting, then storage and memory. Each phase is a one-flag change — no config rewrite.
+The stack is built **frontier-first**: get the gateway, tracing, and UI working against commercial APIs, then add tools, then self-hosting, then storage — and finally the operating recipes that only make sense once all of it is running. Each phase is a one-flag change — no config rewrite.
 
 | Phase | Scope | Adds | Status |
 |:--:|---|---|---|
 | **1** | **Frontier models** — LiteLLM + Langfuse + LibreChat against OpenAI and Anthropic. No GPU required. | `gateway`, `observability`, `ui` | 🚧 in progress |
-| **2** | **MCP tool layer** — MCP servers behind the gateway so tool calls are traced through the same pipeline. First target: ClickHouse Cloud. | `tools` | planned |
+| **2** | **MCP tool layer** — MCP servers behind the gateway so tool calls are traced through the same pipeline. First server is ClickHouse Cloud — settled, not a shortlist. | `tools` | planned |
 | **3** | **Self-hosted serving** — vLLM on a RunPod GPU pod alongside the APIs, in one Langfuse project. | `serving`, `qwen-7b` | planned |
-| **4** | **Storage & memory** — MinIO for datasets/artifacts, MemKV for semantic caching. | `storage`, `memory` | planned |
+| **4** | **Artifact storage** — a MinIO AIStor instance for datasets, eval artifacts and weights, separate from the blob store Langfuse runs for itself. AIStor Free is single-node with no capacity limit, so this phase costs nothing. | `storage` | planned |
+| **5** | **Operating recipes** — context-based routing in LiteLLM, LibreChat Agents over the MCP tools, Langfuse evals. Adds no layers. | — | planned |
+
+> **On MemKV.** The `memory` layer is declared in `stack.yaml` but belongs to no phase. [MinIO MemKV](https://www.min.io/product/memkv) is a KV-cache offload tier for AI inference — attention blocks from GPU memory to NVMe over RDMA — and it requires NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It is not a semantic cache and not a container. See [Build-out phases](docs/phases.md) for the distinction and what to do instead.
 
 ```bash
 ./scripts/stack.sh phases      # which phase is current, and what each adds
@@ -455,9 +460,13 @@ Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phas
 - [ ] **Phase 1** — `docker-compose.yml`, `demo.py`, `seed_traces.py`
 - [ ] **Phase 2** — MCP tool layer; ClickHouse Cloud server first, traced through the same pipeline
 - [ ] **Phase 3** — RunPod vLLM serving; `runpod/deploy_vllm.md`, `terraform/`
-- [ ] **Phase 4** — MinIO artifact storage, MemKV semantic cache
-- [ ] **Agent demo** — a multi-step agent (tool-use loop) producing nested traces in Langfuse
-- [ ] **Eval pipeline** — LLM-as-judge scoring on Langfuse datasets, scheduled
+- [ ] **Phase 4** — MinIO AIStor artifact store (`datasets`, `artifacts`, `weights`), single node
+- [ ] **Phase 5** — operating recipes over Phases 1–4, no new layers:
+  - [ ] context-based routing in LiteLLM (`context_window_fallbacks`), verified in the Langfuse cost report
+  - [ ] a LibreChat Agent driving the ClickHouse MCP server, producing nested tool-call traces
+  - [ ] Langfuse evals — LLM-as-judge over a dataset built from real traces, scored across all three models
+- [ ] **Semantic cache** — LiteLLM's native Redis-backed response cache. Distinct from MemKV; needs its own layer rather than borrowing `memory`
+- [ ] **MemKV** — KV-cache offload. Blocked on NVIDIA STX-class hardware; roadmap item for a real GPU fleet, not a compose service
 - [ ] **Kubernetes target** — Helm profile (`targets.k8s`, currently `enabled: false`)
 
 ---

@@ -21,7 +21,10 @@
   --ch-p1: #2ea043;  /* phase 1 — frontier      */
   --ch-p2: #a371f7;  /* phase 2 — MCP tools     */
   --ch-p3: #d4a72c;  /* phase 3 — self-hosted   */
-  --ch-p4: #4c8dff;  /* phase 4 — storage/memory*/
+  --ch-p4: #4c8dff;  /* phase 4 — artifact store*/
+  --ch-p5: #f778ba;  /* phase 5 — operating recipes. Pink rather than another
+                        cool hue: Phase 5 adds no layers, so it should not
+                        read as one more infrastructure tier. */
 
   --md-code-font: "JetBrains Mono", ui-monospace, monospace;
 }
@@ -236,6 +239,7 @@
 .phase-2 { background: rgba(163,113,247,.15);color: var(--ch-p2); border: 1px solid rgba(163,113,247,.4); }
 .phase-3 { background: rgba(212,167,44,.15); color: var(--ch-p3); border: 1px solid rgba(212,167,44,.4); }
 .phase-4 { background: rgba(76,141,255,.15); color: var(--ch-p4); border: 1px solid rgba(76,141,255,.4); }
+.phase-5 { background: rgba(247,120,186,.15);color: var(--ch-p5); border: 1px solid rgba(247,120,186,.4); }
 
 /* Colour-code the h3 of each phase section on phases.md */
 .md-typeset h3[id^="phase-"] { padding-left: 0.62rem; border-left: 3px solid var(--ch-ink-line); }
@@ -243,6 +247,7 @@
 .md-typeset h3[id^="phase-2"] { border-left-color: var(--ch-p2); }
 .md-typeset h3[id^="phase-3"] { border-left-color: var(--ch-p3); }
 .md-typeset h3[id^="phase-4"] { border-left-color: var(--ch-p4); }
+.md-typeset h3[id^="phase-5"] { border-left-color: var(--ch-p5); }
 
 /* ══ Tables ════════════════════════════════════════════════════════════ */
 

@@ -561,7 +561,7 @@ cmd_secrets() {
 }
 
 cmd_phases() {
-  local cur n name st scope mark
+  local cur n name st scope mark adds_l adds_m
   cur="$(qs '.phases.current')"
   say "${C_B}build-out phases${C_RST}  ${C_DIM}(current: $cur)${C_RST}"
   say ""
@@ -572,9 +572,14 @@ cmd_phases() {
     if [ "$n" = "$cur" ]; then mark="${C_GRN}▶${C_RST}"; else mark=" "; fi
     printf '%s %sPhase %s — %s%s  %s[%s]%s\n' "$mark" "$C_B" "$n" "$name" "$C_RST" "$C_DIM" "$st" "$C_RST"
     printf '    %s\n' "$scope"
+    # A phase can legitimately add nothing — Phase 5 is recipes over existing
+    # layers. Print an em dash rather than a blank, so "adds nothing" reads as
+    # deliberate instead of as a lookup that came back empty.
+    adds_l="$(q ".phases.\"$n\".adds_layers | join(\", \")")"
+    adds_m="$(q ".phases.\"$n\".adds_models | join(\", \")")"
     printf '    %slayers:%s %s   %smodels:%s %s\n' \
-      "$C_DIM" "$C_RST" "$(q ".phases.\"$n\".adds_layers | join(\", \")")" \
-      "$C_DIM" "$C_RST" "$(q ".phases.\"$n\".adds_models | join(\", \")")"
+      "$C_DIM" "$C_RST" "${adds_l:-—}" \
+      "$C_DIM" "$C_RST" "${adds_m:-—}"
     printf '    %sprofile:%s ./scripts/stack.sh up --profile phase-%s\n\n' "$C_DIM" "$C_RST" "$n"
   done
 }
