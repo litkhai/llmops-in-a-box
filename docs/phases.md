@@ -10,59 +10,22 @@ Each phase is a **one-flag change**, not a config rewrite.
 
 ---
 
-## Pre-Phase-1 confirmation
+## Where this stands
 
-Phase 1 has not started. This is the verified state of the repository before it does — checked by running the things, not by reading them.
+Phase 1 runs. `./scripts/stack.sh up` brings nine containers to healthy and every endpoint answers — see the [Workshop](workshop.md) to do it yourself.
 
-### Confirmed working
-
-| Check | Evidence |
+| | |
 |---|---|
-| `stack.yaml` parses, schema 1 | `doctor` reports it |
-| `phases`, `config`, `models`, `render`, `secrets`, `urls` | all run |
-| **All eight profiles resolve** | `phase-1` … `phase-5`, `full`, `headless`, `airgapped` |
-| Layer dependencies resolve transitively | a profile naming a disabled layer warns and skips rather than failing |
-| Every phase is supported on both targets | `targets.*.supported_phases` declares it; Phase 4's cache backend is selected per target rather than requiring a reachable object store |
-| `render` is idempotent | re-running leaves `docker/` unchanged |
-| Every command named in these docs exists | cross-checked against the script's dispatch — no documented command is missing |
-| Every flag named in these docs exists | `--target` `--profile` `--file` `--tf-var` `--all` `--no-render` `--purge` `--dry-run`, plus short forms `-t -p -f -n -h` |
-| Internal doc links and anchors | zero broken across all pages |
-| Ports in these docs match `stack.yaml` | all of them |
-| `secrets audit` | passes — nothing sensitive tracked, in the index, or in history |
+| **Working** | the config model, credential inventory and renderers; all eight profiles resolve; the Phase 1 compose stack on both default and remapped ports |
+| **Needs your keys** | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — everything else is generated locally |
+| **Not built** | `terraform/`, so `--target aws-ec2` exits with a clear message. Phases 2-5 are declared but their layers are `enabled: false` |
 
-### Confirmed missing
-
-| Gap | Consequence |
-|---|---|
-| **`docker/docker-compose.yml` does not exist** | `stack.sh up` exits 1. Never committed; there is no generator for it, so it is hand-written work |
-| Phase 1 credentials are not configured | `doctor` exits 1 on missing gateway keys. Use external-only `secrets setup --phase 1`, then `secrets generate --phase 1` for internal values |
-| `terraform/` is not scaffolded | `--target aws-ec2` exits 1 with a clear message |
-
-!!! info "`up` fails cleanly, and that was designed"
-    ```console
-    $ ./scripts/stack.sh up --dry-run
-    error: compose file not found: docker/docker-compose.yml — not scaffolded yet (Phase 1)
-    ```
-
-    The check runs **before** the renderer, so a failed `up` leaves no half-written config behind — verified by a clean `git status docker/` afterwards.
-
-    It also runs in the parent shell rather than inside `compose_args`, and the script says why: a `die` inside a command substitution would only exit the subshell, and `docker compose` would then run with no `-f` and pick up whatever compose file happened to be in the working directory. Worth knowing, because that failure would have been silent and wrong rather than loud and correct.
-
-### What starting Phase 1 actually requires
-
-1. Write `docker/docker-compose.yml` — seven services across the `gateway`, `obs` and `ui` compose profiles
-2. `./scripts/stack.sh secrets setup --phase 1` for external keys, then `secrets generate --phase 1` for internal demo values
-3. `./scripts/stack.sh doctor` green, then `up`, then `status`
-
-Nothing else in the repository is in the way.
-
-### Re-running this check
+Checks worth re-running after any change:
 
 ```bash
 ./scripts/stack.sh doctor --all         # tooling, secrets, layers, models
 ./scripts/stack.sh secrets audit        # leak and ignore-coverage check
-./scripts/stack.sh config --profile phase-1
-./scripts/stack.sh up --dry-run         # expected to fail until compose exists
+./scripts/stack.sh status               # every endpoint for the active profile
 mkdocs build --strict                   # docs, links and anchors
 ```
 
@@ -117,19 +80,27 @@ LiteLLM gateway, Langfuse observability, and LibreChat against OpenAI and Anthro
 
 #### What actually comes up
 
-Three layers, seven containers. The gap is worth knowing before the first `docker compose up` — Langfuse v3 is not one service.
+Three layers, **nine containers**. Worth knowing before the first `up`, because the gap is entirely Langfuse's and LibreChat's own requirements rather than anything this stack adds.
 
-| Service | Port | Role |
+| Service | Host port | Role |
 |---|---|---|
 | LiteLLM | 4000 | the gateway — one OpenAI-compatible endpoint |
-| Langfuse | 3000 | traces, cost, the dashboard you demo from |
+| Langfuse web | 3000 | traces, cost, the dashboard you demo from |
+| Langfuse worker | — | ingestion and batch jobs |
 | LibreChat | 3080 | chat UI, model picker rendered from the catalog |
-| ClickHouse | 8123 · 9000 | Langfuse's OLAP trace storage |
-| Postgres | 5432 | Langfuse metadata, users, projects |
-| Redis | 6379 | Langfuse queue and cache |
+| ClickHouse | 8123 | Langfuse's OLAP trace storage |
 | MinIO | 9001 · 9002 | Langfuse event-upload blob store |
+| Postgres | — | Langfuse metadata; also LiteLLM's virtual keys and budget |
+| Redis | — | Langfuse queue and cache |
+| MongoDB | — | LibreChat's database |
 
-The last four are **internal dependencies of the observability layer**, not separate layers you chose. They come up on the `obs` compose profile. In particular this MinIO is Langfuse's own — it is not the Phase 4 artifact store, which is a different instance on different ports.
+Two of those catch people out. **Langfuse v4 is two services** — without the worker, traces are accepted and never processed. And **LibreChat requires MongoDB**, which is not Langfuse's Postgres.
+
+The four backends are internal dependencies of the observability layer, not layers you chose; they come up on the `obs` compose profile. This MinIO is Langfuse's own — not the [Phase 4](#phase-4-storage-and-large-context) artifact store, which is a separate instance on different ports.
+
+Only six ports are published. Postgres, Redis, ClickHouse's native protocol and the worker are reachable inside the compose network only — they are the ones most likely to already be taken on a developer machine, and nothing outside the stack needs them. Every published port is overridable, e.g. `LANGFUSE_PORT=3100`.
+
+Measured footprint: **4.7 GiB** across the nine, ClickHouse and LiteLLM being the two largest.
 
 #### The two models
 

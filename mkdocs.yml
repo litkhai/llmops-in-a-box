@@ -60,6 +60,10 @@ theme:
     - search.share
     - search.suggest
     - toc.follow
+    # Folds the page's own headings into the left sidebar instead of a second
+    # column on the right. One navigation surface rather than two, and the
+    # content takes back the width the right column used.
+    - toc.integrate
 
 extra_css:
   - stylesheets/extra.css
@@ -70,6 +74,7 @@ nav:
       - Background: background.md
       - Build-out phases: phases.md
   - Build:
+      - Workshop: workshop.md
       - Configuration: configuration.md
       - Deployment: deployment.md
       - Credentials: credentials.md
@@ -86,10 +91,12 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-      # 4, not 3. The phase sub-sections and the Phase 5 recipes are h4, and at
-      # depth 3 they were absent from the table of contents entirely — on pages
-      # this long that is most of what a reader is trying to jump to.
-      toc_depth: 4
+      # 3, not 4. With toc.integrate the contents live in the left sidebar, and
+      # at depth 4 every "The deliverable" and "The trace shape" landed there
+      # too — the same label repeated down the column is what made it hard to
+      # scan. Depth 3 stops at the phase headings, which is the level anyone is
+      # actually navigating by.
+      toc_depth: 3
   - pymdownx.details
   - pymdownx.inlinehilite
   - pymdownx.snippets

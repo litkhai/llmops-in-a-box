@@ -17,8 +17,7 @@ Two targets, one config. The target is a **flag**, not a fork in the config tree
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup              # external keys only
-./scripts/stack.sh secrets generate --phase 1 # internal demo values
+./scripts/stack.sh secrets setup              # optional d=default credentials; g generates, w writes
 ./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh secrets write
 ./scripts/stack.sh doctor
@@ -54,8 +53,8 @@ Everything except GPU serving runs locally in one compose stack.
 ./scripts/stack.sh up --target docker --profile phase-1
 ```
 
-!!! warning "Not yet — `docker/docker-compose.yml` is unwritten"
-    This command exits 1 today. Writing that compose file *is* Phase 1. The transcripts below show the intended output once it exists; see [Pre-Phase-1 confirmation](phases.md#pre-phase-1-confirmation) for what is verified now.
+!!! tip "First time through? Use the workshop"
+    This page is the reference. The [Workshop](workshop.md) is the same ground as a guided run with a checkpoint after every step.
 
 | Service | URL | Notes |
 |---|---|---|
@@ -68,7 +67,7 @@ Everything except GPU serving runs locally in one compose stack.
 ### First-time setup
 
 !!! tip "Prefer headless initialization — it makes this a single pass"
-    Langfuse can create the org, project, user and **key pair** on first boot from `LANGFUSE_INIT_*` variables, so you choose the keys instead of fetching them and the gateway comes up with tracing already working. See [Credentials](credentials.md#kind-3-the-langfuse-keys-which-look-like-an-ordering-trap-and-are-not) and Langfuse's [Headless Initialization](https://langfuse.com/self-hosting/administration/headless-initialization) guide.
+    Langfuse can create the org, project, user and **key pair** on first boot from `LANGFUSE_INIT_*` variables, so you choose the keys instead of fetching them and the gateway comes up with tracing already working. See [Credentials](credentials.md#kind-3-langfuse-keys-initialized-with-the-demo) and Langfuse's [Headless Initialization](https://langfuse.com/self-hosting/administration/headless-initialization) guide.
 
 The manual route, if you are not using headless init:
 
@@ -186,8 +185,14 @@ That is the whole point of the gateway: swapping `gpt-4o` for a self-hosted `qwe
 
 ## Troubleshooting
 
-??? question "`error: compose file not found: docker/docker-compose.yml`"
-    The compose stack is Phase 1 work in progress. `stack.yaml`, `stack.sh`, and the rendered gateway configs are in place; `docker/docker-compose.yml` is not yet scaffolded.
+??? question "`Bind for 127.0.0.1:3000 failed: port is already allocated`"
+    Something else on the machine holds the port. Every published port is overridable:
+
+    ```bash
+    LANGFUSE_PORT=3100 CLICKHOUSE_HTTP_PORT=8124 ./scripts/stack.sh up
+    ```
+
+    Postgres, Redis, ClickHouse's native port and the Langfuse worker are not published at all — they are reachable only inside the compose network.
 
 ??? question "`yq not found`"
     `brew install yq`. The script requires [mikefarah/yq](https://github.com/mikefarah/yq) v4 specifically and refuses other implementations — the Python `yq` has incompatible syntax.

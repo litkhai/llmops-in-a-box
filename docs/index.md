@@ -133,23 +133,14 @@ flowchart TB
 brew install yq
 
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup     # external keys only
-./scripts/stack.sh secrets generate --phase 1  # internal demo values
+./scripts/stack.sh secrets setup     # optional d=default credentials; then g and w
 ./scripts/stack.sh secrets validate --phase 1
-./scripts/stack.sh secrets write     # generate .env (mode 600)
 
 ./scripts/stack.sh doctor            # preflight
 ./scripts/stack.sh up                # Phase 1 — no GPU needed
 ```
 
-!!! warning "The last line does not work yet"
-    `up` currently exits 1 — `docker/docker-compose.yml` has not been written, and Phase 1 is the work of writing it:
-
-    ```console
-    error: compose file not found: docker/docker-compose.yml — not scaffolded yet (Phase 1)
-    ```
-
-    Everything above that line works today: the config model, the credential inventory, the renderers and `doctor`. See [Pre-Phase-1 confirmation](phases.md#pre-phase-1-confirmation) for exactly what is and is not verified.
+That brings up nine containers on six ports. For a guided run with checkpoints at each step, ending in a traced request you can see in Langfuse, follow the [Workshop](workshop.md).
 
 Continue with [Deployment](deployment.md), or read [Configuration](configuration.md) for how `stack.yaml` and `stack.sh` fit together.
 
