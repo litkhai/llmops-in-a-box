@@ -24,21 +24,22 @@ The inverse order — GPU first — front-loads the least portable, most failure
 ## The phases
 
 ```mermaid
-timeline
-    title Build-out order
-    Phase 1 : Frontier models
-            : LiteLLM + Langfuse + LibreChat
-            : OpenAI + Anthropic
-            : No GPU required
-    Phase 2 : MCP tool layer
-            : ClickHouse Cloud server
-            : Tool calls traced in the same pipeline
-    Phase 3 : Self-hosted serving
-            : vLLM on RunPod GPU pod
-            : Side by side with commercial APIs
-    Phase 4 : Storage and memory
-            : MinIO artifacts + datasets
-            : MemKV semantic cache
+flowchart LR
+    P1["<b>Phase 1</b><br/>Frontier models<br/><small>LiteLLM · Langfuse · LibreChat<br/>OpenAI + Anthropic<br/><i>no GPU required</i></small>"]
+    P2["<b>Phase 2</b><br/>MCP tool layer<br/><small>ClickHouse Cloud<br/>tool calls traced in the<br/>same pipeline</small>"]
+    P3["<b>Phase 3</b><br/>Self-hosted serving<br/><small>vLLM on a RunPod pod<br/>side by side with<br/>commercial APIs</small>"]
+    P4["<b>Phase 4</b><br/>Storage and memory<br/><small>MinIO artifacts<br/>MemKV semantic cache</small>"]
+
+    P1 --> P2 --> P3 --> P4
+
+    classDef p1 fill:#1a7f37,stroke:#2ea043,color:#fff,stroke-width:1.5px
+    classDef p2 fill:#6639ba,stroke:#a371f7,color:#fff,stroke-width:1.5px
+    classDef p3 fill:#9e6a03,stroke:#d4a72c,color:#fff,stroke-width:1.5px
+    classDef p4 fill:#0b5cad,stroke:#4c8dff,color:#fff,stroke-width:1.5px
+    class P1 p1
+    class P2 p2
+    class P3 p3
+    class P4 p4
 ```
 
 ### Phase 1 — Frontier models

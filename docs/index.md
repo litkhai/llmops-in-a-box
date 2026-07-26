@@ -1,13 +1,28 @@
+---
+hide:
+  - navigation
+---
+
+<div class="hero" markdown>
+
+<span class="hero-eyebrow">Sovereign AI Stack</span>
+
 # LLMOPS In a Box
 
-*Sovereign AI Stack*
+<p class="hero-sub">
+A composable, self-hosted enterprise AI stack — model serving, unified gateway,
+chat UI, and full-stack observability, built entirely on open infrastructure.
+Run your own models, mix in commercial APIs, and trace every request in one place.
+</p>
 
-> A composable, self-hosted enterprise AI stack — model serving, unified gateway, chat UI, and full-stack observability, built on open infrastructure.
-
+<p class="hero-stack">
 LiteLLM · LibreChat · Langfuse · vLLM · OpenAI · Anthropic · RunPod · AWS · MinIO
+</p>
 
 [Get started](deployment.md){ .md-button .md-button--primary }
 [See the phases](phases.md){ .md-button }
+
+</div>
 
 ---
 

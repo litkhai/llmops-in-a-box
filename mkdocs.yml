@@ -14,25 +14,34 @@ copyright: MIT licensed. Built on open infrastructure.
 theme:
   name: material
   language: en
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
   icon:
     repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  # Dark first — this reads as a product site rather than a wiki. Light mode
+  # stays fully supported; both are tuned in stylesheets/extra.css.
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: black
-      accent: amber
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: black
-      accent: amber
+      accent: yellow
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: yellow
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
     - navigation.tracking
     - navigation.sections
     - navigation.top
@@ -41,9 +50,14 @@ theme:
     - content.code.annotate
     - content.tabs.link
     - content.action.edit
+    - content.tooltips
     - search.highlight
+    - search.share
     - search.suggest
     - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
 
 nav:
   - Overview: index.md
@@ -98,6 +112,7 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/litkhai/llmops-in-a-box
       name: Source on GitHub
+  generator: false
 
 # Fail the build on a broken internal link rather than shipping it.
 strict: true
