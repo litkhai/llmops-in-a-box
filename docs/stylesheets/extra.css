@@ -112,11 +112,49 @@
   box-shadow: inset 0 -2px 0 var(--ch-yellow);
 }
 
+/* ══ Reading measure ═══════════════════════════════════════════════════
+   Hiding the duplicated left nav gave the content box back 242px, taking
+   prose from ~736px to 938px — about 111 characters a line, well past the
+   60-80 that reads comfortably.
+
+   Capped on text blocks only. Tables, code, Mermaid diagrams and the hero
+   keep the full column, because that is where the extra width earns its
+   keep; a 6-column table does not want to be 34rem wide. Headings keep it
+   too, so their rules still span the section.
+
+   Note root font-size is 125% (20px), so 34rem is 680px, not 544px. */
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > dl,
+.md-typeset > blockquote {
+  max-width: 34rem;
+}
+
 /* ══ Hero (landing page) ═══════════════════════════════════════════════ */
+
+/* Material's "edit this page" pencil is the first child of the content and is
+   floated right. `.hero` sets overflow:hidden, which makes it a block
+   formatting context — and a BFC box shrinks to avoid a float instead of
+   flowing under it. That is why the hero measured 906px inside a 938px content
+   box and its right edge sat exactly 32px (the pencil plus its margin) short
+   of every rule and card below it.
+
+   Removing overflow:hidden would fix the width but let the pencil render on
+   top of the hero's corner. Dropping the pencil on the hero page instead: an
+   "edit this page" affordance on a landing page is noise anyway, and with no
+   float there is nothing for the BFC to avoid. Scoped by :has() so every other
+   page keeps its edit link. */
+.md-content__inner:has(> .hero) > .md-content__button {
+  display: none;
+}
 
 .hero {
   position: relative;
-  margin: -1rem -0.8rem 2.6rem;
+  /* Horizontal margin is 0, not the -0.8rem it used to be: with the float gone
+     the hero fills the content box exactly, which is what lines it up with the
+     rules and cards below. A negative margin here would overhang them. */
+  margin: -1rem 0 2.6rem;
   padding: 3.2rem 2rem 2.2rem;
   border-radius: 14px;
   overflow: hidden;

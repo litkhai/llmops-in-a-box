@@ -335,6 +335,48 @@ The stack's central claim is that self-hosted and commercial models can be compa
 !!! note "Judge selection is part of the experiment"
     Using one of the models under test as its own judge biases the result. Pick a judge outside the comparison set and say which one it was — a reviewer will ask.
 
+#### 5.4 — Guardrails at the gateway
+
+Same argument as tracing, applied to safety: put the check where every request already passes, not in each application.
+
+An app-level guardrail protects one application. The next client — a notebook, a cron job, someone's `curl`, a new team — goes straight past it. Since everything in this stack already goes through LiteLLM to be traced, that is also the one place a guardrail cannot be routed around.
+
+```yaml
+# litellm_config.yaml — pre-call runs before egress, post-call before the
+# response is returned
+guardrails:
+  - guardrail_name: pii-redaction
+    litellm_params: { guardrail: presidio, mode: pre_call }
+  - guardrail_name: prompt-injection
+    litellm_params: { guardrail: prompt_injection, mode: pre_call }
+  - guardrail_name: output-moderation
+    litellm_params: { guardrail: moderation, mode: post_call }
+```
+
+**`mode` is the whole thing.** A PII filter running `post_call` has already sent the PII to OpenAI. Redaction that happens after egress is theatre — and on this stack it is a real risk, because [Phase 1](#phase-1-frontier-models) sends every request to a commercial API.
+
+#### What to guard, and why here
+
+| Guard | Runs | Why it belongs at the gateway |
+|---|---|---|
+| PII / 주민등록번호 redaction | pre-call | the only point before data leaves the boundary |
+| Prompt-injection detection | pre-call | matters most for [Phase 2](#phase-2-mcp-tool-layer) agents holding a warehouse credential |
+| Output moderation | post-call | applies identically to self-hosted and commercial models |
+| Budget cap | per-key | already in `stack.yaml` — `max_budget_usd: 50 / 30d` |
+| Virtual keys | per-team | attribute and cap spend per consumer, not per app |
+
+The last two are worth naming as guardrails rather than config. A runaway agent loop is a safety incident with an invoice attached, and a budget cap is the control that stops it.
+
+#### The deliverable
+
+Send a prompt containing a synthetic resident registration number. It should reach the provider redacted, and the Langfuse trace should show that the guardrail fired. **Both halves matter** — a guardrail you cannot show firing is one you cannot take to an audit.
+
+!!! warning "A SaaS guardrail undoes the airgapped profile"
+    Several guardrail providers are hosted APIs. Routing prompts through one to check them for sensitive data means sending that data to a third party — which contradicts the entire [Phase 3](#phase-3-self-hosted-serving) sovereignty argument and would not survive a 망분리 review. If the deployment claims a network boundary, the guardrail has to run inside it too. Presidio is self-hosted; check any alternative before adopting it.
+
+!!! note "Guardrails cost latency and are wrong sometimes"
+    Every pre-call check sits in the critical path before the first token, and Phase 5.1's routing work is measured in exactly that. Both false positives (a blocked legitimate request) and false negatives are inevitable, so record the rate rather than asserting the guardrail works — the Langfuse traces are already there to measure it with.
+
 ---
 
 ## Profiles
