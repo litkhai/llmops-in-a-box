@@ -1,0 +1,460 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  Sovereign AI Stack — single source of truth
+# ═════════════════════════════════════════════════════════════════════════════
+#
+#  This file describes WHAT the stack is. It says nothing about WHERE it runs.
+#  The deployment target is selected at run time by the script:
+#
+#      ./scripts/stack.sh up --target docker  --profile full
+#      ./scripts/stack.sh up --target aws-ec2 --profile phase-1
+#
+#  Secrets are NEVER stored here — only the NAMES of the env vars that hold
+#  them (`*_env` keys). Values live in .env; see .env.example.
+#
+#  Rendered artifacts (docker/litellm_config.yaml, docker/librechat.yaml) are
+#  generated from the `models` catalog below by `stack.sh render`. Do not edit
+#  them by hand — edit this file and re-render.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+
+schema: 1
+
+project:
+  name: sovereign-ai-stack
+  slug: sais                    # prefix for container / cloud resource names
+  environment: demo             # demo | staging | prod
+  owner: ken.lee@clickhouse.com
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Build-out phases — the order this stack is actually being built.
+#
+#  Each phase has a matching profile below, so `--profile phase-1` brings up
+#  exactly the scope of that phase and nothing more. `current` is what the
+#  default profile tracks; bump it as each phase lands.
+# ─────────────────────────────────────────────────────────────────────────────
+phases:
+  current: 1
+  1:
+    name: Frontier models
+    status: in_progress
+    scope: >-
+      LiteLLM gateway + Langfuse observability + LibreChat, OpenAI and
+      Anthropic models only. No GPU, no self-hosting.
+    adds_layers: [gateway, observability, ui]
+    adds_models: [gpt-4o, claude-sonnet]
+  2:
+    name: MCP tool layer
+    status: planned
+    scope: >-
+      MCP servers exposed to the gateway so tool-use is traced through the
+      same pipeline. Likely first server, ClickHouse Cloud.
+    adds_layers: [tools]
+    adds_models: []
+  3:
+    name: Self-hosted serving
+    status: planned
+    scope: >-
+      vLLM on a RunPod GPU pod behind the same gateway, so self-hosted and
+      commercial models sit side by side in one Langfuse project.
+    adds_layers: [serving]
+    adds_models: [qwen-7b]
+  4:
+    name: Storage and memory
+    status: planned
+    scope: >-
+      MinIO for datasets/artifacts beyond the Langfuse blob store, plus
+      MemKV semantic caching and conversation memory.
+    adds_layers: [memory]
+    adds_models: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Defaults used when the CLI flags are omitted.
+#  Tracks phases.current — Phase 1 is frontier APIs, so no GPU is required to
+#  bring the stack up today.
+# ─────────────────────────────────────────────────────────────────────────────
+defaults:
+  target: docker
+  profile: phase-1
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Profiles — named presets selecting which layers and models come up.
+#
+#  `layers`: layer keys to enable (transitive `requires` are added automatically)
+#  `models`: model aliases to expose; omit the key entirely to expose all
+#            models whose `enabled: true`.
+#
+#  The phase-N profiles are cumulative: phase-3 includes everything phase-1 and
+#  phase-2 brought up.
+# ─────────────────────────────────────────────────────────────────────────────
+profiles:
+
+  # ── Phase 1 (current) — frontier APIs only. No GPU pod needed. ──
+  phase-1:
+    description: "Phase 1 — frontier models (OpenAI + Anthropic), no self-hosting"
+    layers: [gateway, observability, ui]
+    models: [gpt-4o, claude-sonnet]
+
+  # ── Phase 2 — add the MCP tool layer (ClickHouse Cloud first). ──
+  phase-2:
+    description: "Phase 2 — Phase 1 plus the MCP tool layer"
+    layers: [gateway, observability, ui, tools]
+    models: [gpt-4o, claude-sonnet]
+
+  # ── Phase 3 — add self-hosted vLLM on RunPod alongside the APIs. ──
+  phase-3:
+    description: "Phase 3 — Phase 2 plus self-hosted vLLM on RunPod"
+    layers: [gateway, observability, ui, tools, serving]
+
+  # ── Phase 4 — add MinIO storage and MemKV memory/cache. ──
+  phase-4:
+    description: "Phase 4 — Phase 3 plus MinIO storage and MemKV memory"
+    layers: [gateway, observability, ui, tools, serving, storage, memory]
+
+  # ── Convenience aliases, independent of phase ──
+
+  # Everything currently implemented, whatever phase that is.
+  full:
+    description: Every layer whose `enabled` is true
+    layers: [gateway, observability, ui, tools, serving, storage, memory]
+
+  # Gateway + traces, no chat UI. For SDK / script-driven demos.
+  headless:
+    description: Gateway and observability only, no UI
+    layers: [gateway, observability]
+
+  # Nothing leaves the network boundary. Requires Phase 3.
+  airgapped:
+    description: Self-hosted models only — no egress to commercial APIs
+    layers: [gateway, observability, ui, serving]
+    models: [qwen-7b]
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Deployment targets — selected with `--target`, never hard-coded in configs.
+# ─────────────────────────────────────────────────────────────────────────────
+targets:
+
+  docker:
+    kind: compose
+    description: Single-node Docker Compose on a laptop
+    compose_file: docker/docker-compose.yml
+    env_file: .env
+    host: localhost
+
+  aws-ec2:
+    kind: terraform
+    description: Single EC2 instance bootstrapped with the same compose stack
+    dir: terraform
+    host: null                  # resolved from the `public_ip` terraform output
+    vars:
+      instance_type: t3.xlarge
+      volume_size_gb: 100
+      volume_type: gp3
+      region: ap-northeast-2
+      # key_name and allowed_cidr have no safe default — pass them explicitly:
+      #   ./scripts/stack.sh up --target aws-ec2 \
+      #       --tf-var key_name=my-keypair --tf-var allowed_cidr=1.2.3.4/32
+
+  k8s:
+    kind: helm
+    description: Helm-based production deployment
+    enabled: false              # roadmap — the script refuses this target
+    dir: charts
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Layers — the fixed architecture. Implementations are swappable.
+#
+#  phase           : which build-out phase introduces this layer
+#  enabled         : false = declared but not wired up in this repo yet
+#  compose_profile : docker compose profile that starts this layer (null if the
+#                    layer is not a compose service)
+#  managed_by      : compose | runpod | external — who owns the lifecycle
+#  requires        : other layer keys this one cannot run without
+# ─────────────────────────────────────────────────────────────────────────────
+layers:
+
+  gateway:
+    phase: 1
+    enabled: true
+    impl: litellm
+    managed_by: compose
+    compose_profile: gateway
+    image: ghcr.io/berriai/litellm:main-stable
+    port: 4000
+    requires: []
+    options:
+      master_key_env: LITELLM_MASTER_KEY
+      num_retries: 2
+      request_timeout_s: 600
+      drop_params: true         # tolerate params a given provider doesn't accept
+      callbacks:
+        success: [langfuse]
+        failure: [langfuse]
+      routing:
+        strategy: simple-shuffle
+        # If the self-hosted pod is cold or down, fall back to an API model.
+        fallbacks:
+          - from: qwen-7b
+            to: [gpt-4o]
+      budget:
+        max_budget_usd: 50
+        duration: 30d
+
+  observability:
+    phase: 1
+    enabled: true
+    impl: langfuse
+    managed_by: compose
+    compose_profile: obs
+    image: langfuse/langfuse:3
+    port: 3000
+    requires: []
+    options:
+      public_key_env: LANGFUSE_PUBLIC_KEY
+      secret_key_env: LANGFUSE_SECRET_KEY
+      trace_sample_rate: 1.0
+      # Langfuse v3 needs all four of these. They are internal dependencies of
+      # this layer and come up with it on the `obs` compose profile — they are
+      # NOT the Phase 4 `storage` layer, which is a separate, user-facing
+      # artifact store that happens to also be MinIO.
+      backends:
+        clickhouse:
+          image: clickhouse/clickhouse-server:24.12
+          ports: { http: 8123, native: 9000 }
+          role: OLAP trace storage
+        postgres:
+          image: postgres:16-alpine
+          ports: { tcp: 5432 }
+          role: metadata, users, projects
+        redis:
+          image: redis:7-alpine
+          ports: { tcp: 6379 }
+          role: queue and cache
+        minio:
+          image: minio/minio:latest
+          ports: { api: 9002, console: 9001 }
+          role: S3-compatible blob store for Langfuse event uploads
+          buckets: [langfuse]
+
+  ui:
+    phase: 1
+    enabled: true
+    impl: librechat
+    managed_by: compose
+    compose_profile: ui
+    image: ghcr.io/danny-avila/librechat:latest
+    port: 3080
+    requires: [gateway]
+    options:
+      endpoint_label: Sovereign AI Stack
+      allow_registration: true
+      title_model: gpt-4o       # cheap model used to auto-title conversations
+      # Reached over the compose network, not via localhost.
+      gateway_internal_url: http://litellm:4000/v1
+
+  serving:
+    phase: 3
+    # Nothing to scaffold in this repo — the pod is provisioned in the RunPod
+    # console, so this stays `true` and `--profile phase-3` works as soon as
+    # VLLM_API_BASE points at a live pod.
+    enabled: true
+    impl: vllm
+    managed_by: runpod          # NOT a compose service — lives on a GPU pod
+    compose_profile: null
+    port: 8000
+    requires: []
+    options:
+      api_base_env: VLLM_API_BASE
+      api_key_env: VLLM_API_KEY
+      gpu: 1x A40 or L40S        # sufficient for a 7B model
+      model_id: Qwen/Qwen2.5-7B-Instruct
+      max_model_len: 32768
+      dtype: bfloat16
+      alternatives:
+        - LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct   # Korean workloads
+        - yanolja/EEVE-Korean-Instruct-10.8B-v1.0
+
+  # ── Phase 2 — MCP tool layer ──
+  tools:
+    phase: 2
+    enabled: false              # flip to true when the first server lands
+    impl: mcp
+    managed_by: compose
+    compose_profile: tools
+    port: 9100
+    requires: [gateway]
+    options:
+      # First target: ClickHouse Cloud, so agents can query the warehouse and
+      # every tool call is traced through the same LiteLLM → Langfuse path.
+      servers:
+        - name: clickhouse
+          enabled: false
+          transport: sse
+          url_env: MCP_CLICKHOUSE_URL
+          credentials_env: [CLICKHOUSE_CLOUD_HOST, CLICKHOUSE_CLOUD_USER, CLICKHOUSE_CLOUD_PASSWORD]
+          scopes: [read_only]
+
+  # ── Phase 4 — user-facing artifact store (distinct from Langfuse's blob
+  #    store above: datasets, eval artifacts, model weights) ──
+  storage:
+    phase: 4
+    enabled: false
+    impl: minio
+    managed_by: compose
+    compose_profile: storage
+    port: 9011                  # console; API on 9012 — avoids the Langfuse
+    requires: []                # MinIO on 9001/9002
+    options:
+      api_port: 9012
+      buckets: [datasets, artifacts, weights]
+
+  # ── Phase 4 — semantic cache / conversation memory ──
+  memory:
+    phase: 4
+    enabled: false
+    impl: memkv
+    managed_by: compose
+    compose_profile: memory
+    port: 9200
+    requires: [gateway]
+    options:
+      semantic_cache: true
+      similarity_threshold: 0.95
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Model catalog — the ONE place models are defined.
+#
+#  Renders into:
+#    • docker/litellm_config.yaml  → model_list (routing + cost attribution)
+#    • docker/librechat.yaml       → the UI model picker
+#
+#  cost_per_1k is in USD per 1,000 tokens (human-readable); the renderer
+#  converts to LiteLLM's per-token fields. Set 0 for self-hosted so Langfuse
+#  shows API spend against a zero-marginal-cost baseline.
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+
+  - alias: qwen-7b
+    phase: 3
+    enabled: true
+    tier: self_hosted
+    provider: vllm
+    litellm_model: openai/Qwen/Qwen2.5-7B-Instruct
+    api_base_env: VLLM_API_BASE
+    api_key_env: VLLM_API_KEY
+    context_window: 32768
+    cost_per_1k: { input: 0.0, output: 0.0 }
+    rate_limit: { rpm: 60, tpm: 200000 }
+    ui:
+      label: Qwen2.5 7B — self-hosted
+      description: Runs on your own GPU. No data leaves the boundary.
+
+  - alias: gpt-4o
+    phase: 1
+    enabled: true
+    tier: commercial
+    provider: openai
+    litellm_model: openai/gpt-4o
+    api_key_env: OPENAI_API_KEY
+    context_window: 128000
+    cost_per_1k: { input: 0.0025, output: 0.01 }
+    rate_limit: { rpm: 500, tpm: 800000 }
+    ui:
+      label: GPT-4o
+      description: OpenAI commercial API.
+
+  - alias: claude-sonnet
+    phase: 1
+    enabled: true
+    tier: commercial
+    provider: anthropic
+    litellm_model: anthropic/claude-sonnet-4-5
+    api_key_env: ANTHROPIC_API_KEY
+    context_window: 200000
+    cost_per_1k: { input: 0.003, output: 0.015 }
+    rate_limit: { rpm: 500, tpm: 400000 }
+    ui:
+      label: Claude Sonnet 4.5
+      description: Anthropic commercial API, format-translated by LiteLLM.
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Secrets — names only. `stack.sh doctor` verifies these are set in .env.
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  provider: dotenv              # dotenv | aws-ssm | vault
+  file: .env
+  required:
+    - LITELLM_MASTER_KEY
+  # Missing optional secrets produce a warning and disable the models/layers
+  # that need them, rather than failing the deploy.
+  #
+  # Keyed by phase: `doctor` only checks phases up to the highest phase the
+  # selected profile actually needs, so Phase 1 output stays quiet about
+  # RunPod and MCP credentials you do not have yet. Use --all to see them.
+  optional:
+    1:
+      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - NEXTAUTH_SECRET
+      - LANGFUSE_SALT
+      - CLICKHOUSE_PASSWORD
+      - POSTGRES_PASSWORD
+      - MINIO_ROOT_PASSWORD
+    2:
+      - MCP_CLICKHOUSE_URL
+      - CLICKHOUSE_CLOUD_HOST
+      - CLICKHOUSE_CLOUD_USER
+      - CLICKHOUSE_CLOUD_PASSWORD
+    3:
+      - VLLM_API_BASE
+      - VLLM_API_KEY
+    4:
+      - ARTIFACT_MINIO_ROOT_USER
+      - ARTIFACT_MINIO_ROOT_PASSWORD
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Render targets for the model catalog.
+# ─────────────────────────────────────────────────────────────────────────────
+render:
+  banner: >-
+    GENERATED by scripts/stack.sh render — DO NOT EDIT.
+    Edit stack.yaml and re-run `./scripts/stack.sh render`.
+  files:
+    litellm: docker/litellm_config.yaml
+    librechat: docker/librechat.yaml
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Health checks — {{host}} is substituted from the resolved target.
+#  Used by `stack.sh status`. Checks for disabled layers are skipped.
+# ─────────────────────────────────────────────────────────────────────────────
+health:
+  timeout_s: 5
+  checks:
+    - name: litellm
+      layer: gateway
+      url: http://{{host}}:4000/health/liveliness
+    - name: langfuse
+      layer: observability
+      url: http://{{host}}:3000/api/public/health
+    - name: librechat
+      layer: ui
+      url: http://{{host}}:3080/health
+    - name: clickhouse
+      layer: observability
+      url: http://{{host}}:8123/ping
+    - name: langfuse-minio
+      layer: observability
+      url: http://{{host}}:9002/minio/health/live
+    - name: mcp
+      layer: tools
+      url: http://{{host}}:9100/health
+    - name: vllm
+      layer: serving
+      url: "{{VLLM_API_BASE}}/models"
+    - name: artifact-minio
+      layer: storage
+      url: http://{{host}}:9012/minio/health/live
+    - name: memkv
+      layer: memory
+      url: http://{{host}}:9200/health
