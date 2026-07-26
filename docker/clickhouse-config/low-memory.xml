@@ -17,9 +17,19 @@
     <mark_cache_size>268435456</mark_cache_size>
     <uncompressed_cache_size>0</uncompressed_cache_size>
 
-    <!-- One background pool is plenty at this volume, and each thread costs. -->
-    <background_pool_size>4</background_pool_size>
-    <background_schedule_pool_size>4</background_schedule_pool_size>
+    <!--
+      Do NOT shrink background_pool_size here. An earlier version of this file
+      set it to 4, and ClickHouse refused to start:
+
+        Code: 36. The value of 'number_of_free_entries_in_pool_to_execute_mutation'
+        (20) is greater than 'background_pool_size' *
+        'background_merges_mutations_concurrency_ratio' (8)
+
+      That threshold defaults to 20, so the product has to stay above it.
+      Lowering the pool would mean lowering the threshold too, and the pools are
+      threads rather than heap — they are not where the memory goes. The cap
+      above is the lever that matters.
+    -->
 
     <!-- Keep the logs from growing without bound on a long-lived laptop stack. -->
     <logger>

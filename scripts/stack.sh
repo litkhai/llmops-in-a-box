@@ -263,9 +263,21 @@ render_litellm() {
     printf '  drop_params: %s\n'  "$(qs '.layers.gateway.options.drop_params')"
     printf '  num_retries: %s\n'  "$(qs '.layers.gateway.options.num_retries')"
     printf '  request_timeout: %s\n' "$(qs '.layers.gateway.options.request_timeout_s')"
-    local budget
+    # LiteLLM rejects max_budget without budget_duration and refuses to start:
+    #   Exception: budget_duration not set on Proxy. budget_duration is
+    #   required to use max_budget.
+    # stack.yaml carries both (max_budget_usd + duration); only the first was
+    # being emitted, so the gateway crash-looped on exit code 3 as soon as the
+    # compose stack actually ran it. Emit the pair, or neither.
+    local budget budget_duration
     budget="$(qs '.layers.gateway.options.budget.max_budget_usd')"
-    [ -n "$budget" ] && printf '  max_budget: %s\n' "$budget"
+    budget_duration="$(qs '.layers.gateway.options.budget.duration')"
+    if [ -n "$budget" ] && [ -n "$budget_duration" ]; then
+      printf '  max_budget: %s\n' "$budget"
+      printf '  budget_duration: %s\n' "$budget_duration"
+    elif [ -n "$budget" ]; then
+      warn "budget.max_budget_usd is set but budget.duration is not — omitting both, LiteLLM requires the pair"
+    fi
 
     # ── router_settings — only emit fallbacks whose models are all present ──
     printf '\nrouter_settings:\n'
@@ -469,11 +481,14 @@ credential_read_file() {
 }
 
 cmd_secrets_init() {
+  local added
   [ -f "$CRED_TEMPLATE" ] || die "credential template not found: $CRED_TEMPLATE_REL"
   [ ! -L "$CRED_FILE" ] || die "$CRED_FILE_REL must not be a symlink"
   if [ -f "$CRED_FILE" ]; then
     chmod 600 "$CRED_FILE"
     ok "$CRED_FILE_REL already exists (mode 600 enforced)"
+    added="$(sync_credential_inventory)"
+    [ "$added" -eq 0 ] || ok "added $added new credential definition(s) from the template"
     return 0
   fi
 
@@ -482,6 +497,51 @@ cmd_secrets_init() {
   chmod 600 "$CRED_FILE"
   ok "created $CRED_FILE_REL (mode 600)"
   say "${C_DIM}next:${C_RST} ./scripts/stack.sh secrets setup"
+}
+
+sync_credential_inventory() {
+  local dir tmp added
+  if ! added="$(
+    CRED_TEMPLATE_PATH="$CRED_TEMPLATE" CRED_PRIVATE_PATH="$CRED_FILE" \
+    yq -n -r '
+      load(strenv(CRED_TEMPLATE_PATH)) as $template |
+      load(strenv(CRED_PRIVATE_PATH)) as $private |
+      ($private.credentials | map(.env)) as $existing |
+      [$template.credentials[] | select(.env as $env | ($existing | contains([$env])) == false)] |
+      length
+    '
+  )"; then
+    die "failed to compare $CRED_FILE_REL with the credential template"
+  fi
+  case "$added" in ''|*[!0-9]*) die "credential template comparison returned an invalid count" ;; esac
+  if [ "$added" -eq 0 ]; then
+    printf '0'
+    return 0
+  fi
+
+  dir="$(dirname "$CRED_FILE")"
+  umask 077
+  tmp="$(mktemp "$dir/.credentials.XXXXXX")"
+  if ! CRED_TEMPLATE_PATH="$CRED_TEMPLATE" CRED_PRIVATE_PATH="$CRED_FILE" \
+    yq -n '
+      load(strenv(CRED_TEMPLATE_PATH)) as $template |
+      load(strenv(CRED_PRIVATE_PATH)) as $private |
+      ($private.credentials | map(.env)) as $existing |
+      $private |
+      .credentials += [
+        $template.credentials[] |
+        select(.env as $env | ($existing | contains([$env])) == false)
+      ]
+    ' > "$tmp"; then
+    rm -f "$tmp"
+    die "failed to synchronize $CRED_FILE_REL; the original was preserved"
+  fi
+  yq -e '.credentials | type == "!!seq"' "$tmp" >/dev/null \
+    || { rm -f "$tmp"; die "credential synchronization produced invalid YAML; the original was preserved"; }
+  chmod 600 "$tmp"
+  mv "$tmp" "$CRED_FILE"
+  chmod 600 "$CRED_FILE"
+  printf '%s' "$added"
 }
 
 validate_phase() {
@@ -523,15 +583,10 @@ credential_in_scope() {
   [ "$phase" = "$SECRETS_PHASE" ]
 }
 
-credential_input_mode() {
-  local env="$1" gen="$2" mode
-  mode="$(yq -r ".credentials[] | select(.env == \"$env\") | .input // \"\"" "$CRED_FILE")"
-  if [ -z "$mode" ]; then
-    mode="$(yq -r ".credentials[] | select(.env == \"$env\") | .input // \"\"" "$CRED_TEMPLATE")"
-  fi
-  if [ -n "$mode" ]; then printf '%s' "$mode"
-  elif [ -n "$gen" ]; then printf 'generated'
-  else printf 'external'; fi
+credential_generator_spec() {
+  local env="$1" current="$2"
+  if [ -n "$current" ]; then printf '%s' "$current"
+  else yq -r ".credentials[] | select(.env == \"$env\") | .generate // \"\"" "$CRED_TEMPLATE"; fi
 }
 
 credential_generator_id() {
@@ -539,6 +594,8 @@ credential_generator_id() {
   # never eval them. New templates use the stable IDs on the left.
   case "$1" in
     sk-hex-24|"openssl rand -hex 24 | sed 's/^/sk-/'") printf 'sk-hex-24' ;;
+    lf-pk-hex-16)                                      printf 'lf-pk-hex-16' ;;
+    lf-sk-hex-24)                                      printf 'lf-sk-hex-24' ;;
     hex-32|"openssl rand -hex 32")                     printf 'hex-32' ;;
     base64-32|"openssl rand -base64 32")               printf 'base64-32' ;;
     hex-16|"openssl rand -hex 16")                     printf 'hex-16' ;;
@@ -558,6 +615,8 @@ generate_credential_value() {
   }
   case "$id" in
     sk-hex-24)    r="$(openssl rand -hex 24)" && GENERATED_VALUE="sk-$r" ;;
+    lf-pk-hex-16) r="$(openssl rand -hex 16)" && GENERATED_VALUE="lf_pk_$r" ;;
+    lf-sk-hex-24) r="$(openssl rand -hex 24)" && GENERATED_VALUE="lf_sk_$r" ;;
     hex-32)       GENERATED_VALUE="$(openssl rand -hex 32)" ;;
     base64-32)    GENERATED_VALUE="$(openssl rand -base64 32 | tr -d '\r\n')" ;;
     hex-16)       GENERATED_VALUE="$(openssl rand -hex 16)" ;;
@@ -577,6 +636,7 @@ validate_credential_value() {
   esac
   case "$env" in
     OPENAI_API_KEY|ANTHROPIC_API_KEY|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|\
+    LANGFUSE_EE_LICENSE_KEY|\
     RUNPOD_API_KEY|VLLM_API_KEY|HF_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)
       case "$val" in *[[:space:]]*) VALIDATION_MESSAGE="must not contain whitespace"; return 1 ;; esac ;;
   esac
@@ -594,14 +654,20 @@ validate_credential_value() {
         *) VALIDATION_MESSAGE="expected prefix sk-"; return 1 ;; esac ;;
     LITELLM_SALT_KEY)
       [ "${#val}" -ge 32 ] || { VALIDATION_MESSAGE="must be at least 32 characters"; return 1; } ;;
+    LANGFUSE_ENCRYPTION_KEY|LIBRECHAT_CREDS_KEY|LIBRECHAT_JWT_SECRET|LIBRECHAT_JWT_REFRESH_SECRET)
+      case "$val" in *[!0-9a-fA-F]*|'') VALIDATION_MESSAGE="expected 64 hexadecimal characters"; return 1 ;; esac
+      [ "${#val}" -eq 64 ] || { VALIDATION_MESSAGE="expected 64 hexadecimal characters"; return 1; } ;;
+    LIBRECHAT_CREDS_IV)
+      case "$val" in *[!0-9a-fA-F]*|'') VALIDATION_MESSAGE="expected 32 hexadecimal characters"; return 1 ;; esac
+      [ "${#val}" -eq 32 ] || { VALIDATION_MESSAGE="expected 32 hexadecimal characters"; return 1; } ;;
     LANGFUSE_PUBLIC_KEY)
-      case "$val" in pk-lf-?*) [ "${#val}" -ge 12 ] \
+      case "$val" in lf_pk_?*|pk-lf-?*) [ "${#val}" -ge 12 ] \
         || { VALIDATION_MESSAGE="expected a Langfuse public key"; return 1; } ;;
-        *) VALIDATION_MESSAGE="expected prefix pk-lf-"; return 1 ;; esac ;;
+        *) VALIDATION_MESSAGE="expected prefix lf_pk_"; return 1 ;; esac ;;
     LANGFUSE_SECRET_KEY)
-      case "$val" in sk-lf-?*) [ "${#val}" -ge 12 ] \
+      case "$val" in lf_sk_?*|sk-lf-?*) [ "${#val}" -ge 12 ] \
         || { VALIDATION_MESSAGE="expected a Langfuse secret key"; return 1; } ;;
-        *) VALIDATION_MESSAGE="expected prefix sk-lf-"; return 1 ;; esac ;;
+        *) VALIDATION_MESSAGE="expected prefix lf_sk_"; return 1 ;; esac ;;
     VLLM_API_BASE)
       case "$val" in http://*/v1|https://*/v1) : ;; *) VALIDATION_MESSAGE="expected an http(s) URL ending in /v1"; return 1 ;; esac ;;
     MCP_CLICKHOUSE_URL)
@@ -673,7 +739,7 @@ credential_status_word() {
 }
 
 cmd_secrets_status() {
-  local f count i env name phase val status any=0
+  local f count i env name phase val required status any=0
   [ -z "$SECRETS_PHASE" ] || validate_phase "$SECRETS_PHASE" \
     || die "--phase must be 1, 2, 3, 4, or 5"
   f="$(credential_read_file)"
@@ -687,9 +753,11 @@ cmd_secrets_status() {
     name="$(yq -r ".credentials[$i].name // \"\"" "$f")"
     phase="$(yq -r ".credentials[$i].phase // \"\"" "$f")"
     val="$(yq -r ".credentials[$i].value // \"\"" "$f")"
+    required="$(yq -r ".credentials[$i].required" "$f")"
     i=$((i + 1))
     credential_in_scope "$phase" || continue
     [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    [ "$required" != "false" ] || name="$name (optional)"
     status="$(credential_status_word "$env" "$val")"
     printf '  %-4s %-34s %-10s %s\n' "$phase" "$env" "$status" "$name"
     any=1
@@ -740,6 +808,13 @@ prompt_secret_value() {
   [ "$had_x" -eq 0 ] || set +x
 }
 
+prompt_config_value() {
+  local env="$1" val
+  printf 'Enter %s: ' "$env" >&2
+  IFS= read -r val
+  PROMPTED_SECRET_VALUE="$val"
+}
+
 cmd_secrets_set() {
   local env="$SECRETS_ONLY" val
   require_credentials
@@ -768,7 +843,7 @@ cmd_secrets_generate() {
     env="$(cq ".credentials[$i].env")"
     phase="$(cq ".credentials[$i].phase")"
     val="$(cq ".credentials[$i].value")"
-    gen="$(cq ".credentials[$i].generate")"
+    gen="$(credential_generator_spec "$env" "$(cq ".credentials[$i].generate")")"
     i=$((i + 1))
     credential_in_scope "$phase" || continue
     [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
@@ -791,70 +866,308 @@ cmd_secrets_generate() {
   say "${C_DIM}$changed credential(s) generated; no values were printed${C_RST}"
 }
 
-cmd_secrets_setup() {
-  local count i env name phase val gen console input status action retry any=0
-  cmd_secrets_init >/dev/null
-  select_secrets_phase
-  require_credentials
-  info "External credential setup  ${C_DIM}phase=$SECRETS_PHASE${C_RST}"
-  say "${C_DIM}Current state for every credential; values are never printed.${C_RST}"
-  cmd_secrets_status
-  say ""
-  say "${C_DIM}Only externally issued or provisioned values are prompted here."
-  say "Local generated values use: ./scripts/stack.sh secrets generate --phase $SECRETS_PHASE${C_RST}"
-  count="$(cq '.credentials | length')"
-  i=0
-  while [ "$i" -lt "$count" ]; do
-    env="$(cq ".credentials[$i].env")"
-    name="$(cq ".credentials[$i].name")"
-    phase="$(cq ".credentials[$i].phase")"
-    val="$(cq ".credentials[$i].value")"
-    gen="$(cq ".credentials[$i].generate")"
-    console="$(cq ".credentials[$i].console")"
-    input="$(credential_input_mode "$env" "$gen")"
-    i=$((i + 1))
-    credential_in_scope "$phase" || continue
-    [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
-    [ "$input" = "external" ] || continue
-    any=1
+configure_external_credential() {
+  local index="$1" env name val console required status action retry input
+  env="${inventory_envs[$index]}"
+  name="${inventory_names[$index]}"
+  case "$env" in
+    AWS_PROFILE) name="AWS SSO profile" ;;
+    AWS_ACCESS_KEY_ID) name="AWS access key ID (static fallback)" ;;
+    AWS_SECRET_ACCESS_KEY) name="AWS secret access key (static fallback)" ;;
+  esac
+  console="${inventory_consoles[$index]}"
+  required="${inventory_required[$index]}"
+  input="${inventory_inputs[$index]}"
+
+  while :; do
+    val="${inventory_values[$index]}"
     status="$(credential_status_word "$env" "$val")"
     say ""
-    say "${C_B}$env${C_RST} — $name  [$status]"
-    [ -z "$console" ] || say "  ${C_DIM}source: $console${C_RST}"
-    if [ -n "$val" ]; then
-      printf '  [k]eep  [e]replace  [c]lear: ' >&2
+    if [ "$required" = "false" ]; then
+      say "${C_B}$env${C_RST} — $name (optional)  [$status]"
     else
-      printf '  [e]nter  [s]kip: ' >&2
+      say "${C_B}$env${C_RST} — $name  [$status]"
     fi
-    IFS= read -r action
-    [ -n "$action" ] || { [ -n "$val" ] && action=k || action=e; }
+    [ -z "$console" ] || say "  ${C_DIM}source: $console${C_RST}"
+
+    if [ -n "$val" ]; then
+      printf '  [e]replace  [c]lear  [b]ack: ' >&2
+      IFS= read -r action
+      [ -n "$action" ] || action=b
+    else
+      printf '  Press Enter to input, or [b]ack: ' >&2
+      IFS= read -r action
+      [ -n "$action" ] || action=e
+    fi
+
     case "$action" in
-      k|K|s|S) : ;;
+      b|B) return 0 ;;
       c|C)
+        [ -n "$val" ] || { warn "$env is already empty"; continue; }
         persist_credential_value "$env" ""
-        ok "$env cleared" ;;
+        inventory_values[$index]=""
+        ok "$env cleared"
+        return 0 ;;
       e|E)
         while :; do
-          prompt_secret_value "$env"
+          if [ "$input" = "config" ]; then prompt_config_value "$env"
+          else prompt_secret_value "$env"; fi
           if validate_credential_value "$env" "$PROMPTED_SECRET_VALUE"; then
             persist_credential_value "$env" "$PROMPTED_SECRET_VALUE"
+            inventory_values[$index]="$PROMPTED_SECRET_VALUE"
             unset PROMPTED_SECRET_VALUE
             ok "$env stored and validated"
-            break
+            return 0
           fi
           unset PROMPTED_SECRET_VALUE
           warn "$env rejected: $VALIDATION_MESSAGE"
-          printf '  [r]etry  [s]kip: ' >&2
+          printf '  [r]etry  [b]ack: ' >&2
           IFS= read -r retry
-          case "$retry" in r|R) : ;; *) break ;; esac
+          case "$retry" in r|R) : ;; *) return 0 ;; esac
         done ;;
-      *) warn "unknown choice '$action' — skipped" ;;
+      *) warn "unknown choice '$action'" ;;
     esac
-    unset val
   done
-  [ "$any" -eq 1 ] || ok "Phase $SECRETS_PHASE has no external credential inputs"
-  say ""
-  cmd_secrets_status
+}
+
+cmd_secrets_setup() {
+  local separator=$'\x1f' count=0 i env name phase phase_name last_phase val gen input required status choice selected bootstrap_target menu_count=0
+  local group_count=0 group_choice group_id group_index group_total group_set sub_count sub_choice inventory_index
+  local aws_profile_value aws_access_value aws_secret_value aws_auth_status
+  local inventory_envs=() inventory_phases=() inventory_values=() inventory_names=()
+  local inventory_consoles=() inventory_required=() inventory_generators=()
+  local inventory_inputs=() inventory_bootstrap_targets=() inventory_phase_names=()
+  local menu_indices=() menu_phases=() group_ids=() group_indices=()
+  cmd_secrets_init >/dev/null
+  [ -z "$SECRETS_PHASE" ] || validate_phase "$SECRETS_PHASE" \
+    || die "--phase must be 1, 2, 3, 4, or 5"
+  require_credentials
+
+  while IFS="$separator" read -r env phase val name console required gen input bootstrap_target phase_name; do
+    [ "$required" != "null" ] || required="true"
+    if [ -z "$input" ]; then
+      if [ -n "$gen" ]; then input="generated"
+      else input="external"; fi
+    fi
+    inventory_envs[$count]="$env"
+    inventory_phases[$count]="$phase"
+    inventory_values[$count]="$val"
+    inventory_names[$count]="$name"
+    inventory_consoles[$count]="$console"
+    inventory_required[$count]="$required"
+    inventory_generators[$count]="$gen"
+    inventory_inputs[$count]="$input"
+    inventory_bootstrap_targets[$count]="$bootstrap_target"
+    inventory_phase_names[$count]="$phase_name"
+    count=$((count + 1))
+  done < <(
+    CRED_TEMPLATE_PATH="$CRED_TEMPLATE" \
+    CRED_PRIVATE_PATH="$CRED_FILE" \
+    STACK_CONFIG_PATH="$STACK_FILE" \
+    FIELD_SEPARATOR="$separator" \
+    yq -n -r '
+      load(strenv(CRED_TEMPLATE_PATH)) as $template |
+      load(strenv(CRED_PRIVATE_PATH)) as $private |
+      load(strenv(STACK_CONFIG_PATH)) as $stack |
+      $template.credentials[] as $item |
+      (($private.credentials | map(select(.env == $item.env)) | .[0].value) // "") as $value |
+      [
+        ($item.env // ""),
+        (($item.phase // 0) | tostring),
+        $value,
+        ($item.name // ""),
+        ($item.console // ""),
+        ($item.required | tostring),
+        ($item.generate // ""),
+        ($item.input // ""),
+        ($item.bootstrap_target // ""),
+        ($stack.phases[(($item.phase // 0) | tostring)].name // "")
+      ] | join(strenv(FIELD_SEPARATOR))
+    '
+  )
+
+  # Target bootstrap authentication is an optional group, not a prerequisite
+  # menu. Users who deploy only with Docker can ignore it entirely.
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="${inventory_envs[$i]}"
+    bootstrap_target="${inventory_bootstrap_targets[$i]}"
+    input="${inventory_inputs[$i]}"
+    if [ -n "$bootstrap_target" ] \
+      && { [ "$input" = "external" ] || [ "$env" = "AWS_PROFILE" ]; } \
+      && { [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ]; }; then
+      menu_indices[$menu_count]="$i"
+      menu_phases[$menu_count]="0"
+      menu_count=$((menu_count + 1))
+    fi
+    i=$((i + 1))
+  done
+
+  # Workload credentials stay grouped by phase. Generated demo values and
+  # non-secret configuration are deliberately absent.
+  for phase in 1 2 3 4 5; do
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      env="${inventory_envs[$i]}"
+      [ "${inventory_phases[$i]}" = "$phase" ] || { i=$((i + 1)); continue; }
+      bootstrap_target="${inventory_bootstrap_targets[$i]}"
+      input="${inventory_inputs[$i]}"
+      i=$((i + 1))
+      [ -z "$bootstrap_target" ] || continue
+      credential_in_scope "$phase" || continue
+      [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+      [ "$input" = "external" ] || continue
+      menu_indices[$menu_count]="$((i - 1))"
+      menu_phases[$menu_count]="$phase"
+      menu_count=$((menu_count + 1))
+    done
+  done
+
+  if [ "$menu_count" -eq 0 ]; then
+    if [ -n "$SECRETS_PHASE" ]; then
+      ok "Phase $SECRETS_PHASE has no external credentials"
+    else
+      ok "No external credentials are configured"
+    fi
+    return 0
+  fi
+
+  last_phase=""
+  i=0
+  while [ "$i" -lt "$menu_count" ]; do
+    phase="${menu_phases[$i]}"
+    if [ "$phase" != "$last_phase" ]; then
+      group_ids[$group_count]="$phase"
+      group_count=$((group_count + 1))
+      last_phase="$phase"
+    fi
+    i=$((i + 1))
+  done
+
+  while :; do
+    say ""
+    info "Credential setup  ${C_DIM}values are never printed${C_RST}"
+    say "  ${C_B}GROUPS${C_RST}"
+    i=0
+    while [ "$i" -lt "$group_count" ]; do
+      group_id="${group_ids[$i]}"
+      group_total=0
+      group_set=0
+      group_index=0
+      while [ "$group_index" -lt "$menu_count" ]; do
+        if [ "${menu_phases[$group_index]}" = "$group_id" ]; then
+          group_total=$((group_total + 1))
+          inventory_index="${menu_indices[$group_index]}"
+          val="${inventory_values[$inventory_index]}"
+          [ -z "$val" ] || group_set=$((group_set + 1))
+        fi
+        group_index=$((group_index + 1))
+      done
+      if [ "$group_id" = "0" ]; then
+        aws_profile_value=""
+        aws_access_value=""
+        aws_secret_value=""
+        group_index=0
+        while [ "$group_index" -lt "$menu_count" ]; do
+          if [ "${menu_phases[$group_index]}" = "0" ]; then
+            inventory_index="${menu_indices[$group_index]}"
+            case "${inventory_envs[$inventory_index]}" in
+              AWS_PROFILE) aws_profile_value="${inventory_values[$inventory_index]}" ;;
+              AWS_ACCESS_KEY_ID) aws_access_value="${inventory_values[$inventory_index]}" ;;
+              AWS_SECRET_ACCESS_KEY) aws_secret_value="${inventory_values[$inventory_index]}" ;;
+            esac
+          fi
+          group_index=$((group_index + 1))
+        done
+        if [ -n "$aws_profile_value" ]; then
+          aws_auth_status="SSO profile configured"
+        elif [ -n "$aws_access_value" ] && [ -n "$aws_secret_value" ]; then
+          aws_auth_status="static keys configured"
+        elif [ -n "$aws_access_value" ] || [ -n "$aws_secret_value" ]; then
+          aws_auth_status="static key pair incomplete"
+        else
+          aws_auth_status="not configured"
+        fi
+        printf '  %s) %-38s %s\n' "$((i + 1))" "AWS authentication" "$aws_auth_status"
+      else
+        phase_name=""
+        group_index=0
+        while [ "$group_index" -lt "$menu_count" ]; do
+          if [ "${menu_phases[$group_index]}" = "$group_id" ]; then
+            inventory_index="${menu_indices[$group_index]}"
+            phase_name="${inventory_phase_names[$inventory_index]}"
+            break
+          fi
+          group_index=$((group_index + 1))
+        done
+        phase_name="Phase $group_id · $phase_name"
+        printf '  %s) %-38s %s/%s configured\n' "$((i + 1))" "$phase_name" "$group_set" "$group_total"
+      fi
+      i=$((i + 1))
+    done
+    say ""
+    printf 'Select a group [1-%s], or [q/Enter] finish: ' "$group_count" >&2
+    IFS= read -r group_choice
+    case "$group_choice" in
+      ''|q|Q) break ;;
+      *[!0-9]*) warn "enter a number from 1 to $group_count, or q"; continue ;;
+    esac
+    [ "$group_choice" -ge 1 ] 2>/dev/null && [ "$group_choice" -le "$group_count" ] 2>/dev/null \
+      || { warn "enter a number from 1 to $group_count"; continue; }
+    group_id="${group_ids[$((group_choice - 1))]}"
+
+    group_indices=()
+    sub_count=0
+    i=0
+    while [ "$i" -lt "$menu_count" ]; do
+      if [ "${menu_phases[$i]}" = "$group_id" ]; then
+        group_indices[$sub_count]="${menu_indices[$i]}"
+        sub_count=$((sub_count + 1))
+      fi
+      i=$((i + 1))
+    done
+
+    while :; do
+      say ""
+      if [ "$group_id" = "0" ]; then
+        info "AWS authentication  ${C_DIM}SSO profile recommended; static keys are the fallback${C_RST}"
+      else
+        inventory_index="${group_indices[0]}"
+        info "Phase $group_id · ${inventory_phase_names[$inventory_index]}"
+      fi
+      printf '  %-4s %-34s %-10s %s\n' NO ENV STATUS NAME
+      i=0
+      while [ "$i" -lt "$sub_count" ]; do
+        inventory_index="${group_indices[$i]}"
+        env="${inventory_envs[$inventory_index]}"
+        name="${inventory_names[$inventory_index]}"
+        case "$env" in
+          AWS_PROFILE) name="AWS SSO profile" ;;
+          AWS_ACCESS_KEY_ID) name="AWS access key ID (static fallback)" ;;
+          AWS_SECRET_ACCESS_KEY) name="AWS secret access key (static fallback)" ;;
+        esac
+        val="${inventory_values[$inventory_index]}"
+        required="${inventory_required[$inventory_index]}"
+        status="$(credential_status_word "$env" "$val")"
+        [ "$required" != "false" ] || name="$name (optional)"
+        printf '  %-4s %-34s %-10s %s\n' "$((i + 1))" "$env" "$status" "$name"
+        i=$((i + 1))
+      done
+      say ""
+      printf 'Select [1-%s], [b]ack, or [q]uit: ' "$sub_count" >&2
+      IFS= read -r sub_choice
+      case "$sub_choice" in
+        b|B|'') break ;;
+        q|Q) choice=q; break 2 ;;
+        *[!0-9]*) warn "enter a number from 1 to $sub_count, b, or q"; continue ;;
+      esac
+      [ "$sub_choice" -ge 1 ] 2>/dev/null && [ "$sub_choice" -le "$sub_count" ] 2>/dev/null \
+        || { warn "enter a number from 1 to $sub_count"; continue; }
+      selected="${group_indices[$((sub_choice - 1))]}"
+      configure_external_credential "$selected"
+    done
+  done
+
   say "${C_DIM}next:${C_RST} ./scripts/stack.sh secrets write"
 }
 
@@ -1233,8 +1546,8 @@ ${C_B}USAGE${C_RST}
 
 ${C_B}COMMANDS${C_RST}
   doctor      Preflight: tooling, secrets, layers, models
-  secrets init       Create the private credential inventory (mode 600)
-  secrets setup      Choose a phase and interactively configure its credentials
+  secrets init       Create or synchronize the private inventory (mode 600)
+  secrets setup      Prompt only for external credentials
   secrets set NAME   Set one credential with hidden input and format validation
   secrets generate   Generate and store local credentials without printing them
   secrets status     Show set / missing / invalid state without showing values

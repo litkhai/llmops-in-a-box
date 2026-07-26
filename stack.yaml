@@ -542,11 +542,23 @@ secrets:
       - ANTHROPIC_API_KEY
       - LANGFUSE_PUBLIC_KEY
       - LANGFUSE_SECRET_KEY
+      - LANGFUSE_EE_LICENSE_KEY
       - NEXTAUTH_SECRET
       - LANGFUSE_SALT
+      # Langfuse v4 requires both of these in addition to SALT. ENCRYPTION_KEY
+      # is 256-bit hex (openssl rand -hex 32) and encrypts stored provider
+      # credentials — losing it makes existing rows unreadable. REDIS_AUTH must
+      # match the password redis-server is started with; Langfuse has no
+      # unauthenticated Redis mode in its compose topology.
+      - LANGFUSE_ENCRYPTION_KEY
+      - REDIS_AUTH
       - CLICKHOUSE_PASSWORD
       - POSTGRES_PASSWORD
       - MINIO_ROOT_PASSWORD
+      - LIBRECHAT_CREDS_KEY
+      - LIBRECHAT_CREDS_IV
+      - LIBRECHAT_JWT_SECRET
+      - LIBRECHAT_JWT_REFRESH_SECRET
     2:
       - MCP_CLICKHOUSE_URL
       - CLICKHOUSE_CLOUD_HOST
