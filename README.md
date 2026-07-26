@@ -9,6 +9,7 @@
 
 | | |
 |---|---|
+| [**Workshop**](https://litkhai.github.io/llmops-in-a-box/workshop/) | a guided Phase 1 run, empty machine to traced request, checkpoint at every step |
 | [**Background**](https://litkhai.github.io/llmops-in-a-box/background/) | why a gateway is the load-bearing decision, what was considered at each layer, why ClickHouse sits under Langfuse, what 망분리 / ISMS-P require, and a glossary |
 | [**Build-out phases**](https://litkhai.github.io/llmops-in-a-box/phases/) | the build order, what each phase proves, and what is deliberately not scheduled |
 | [**Configuration**](https://litkhai.github.io/llmops-in-a-box/configuration/) | how one `stack.yaml` and one script describe the whole stack |
@@ -224,7 +225,9 @@ Layer dependencies resolve transitively — asking for a layer brings up what it
 │   ├── healthcheck.sh          # superseded by `stack.sh status`      (todo)
 │   └── seed_traces.py          # sample traffic incl. one failure     (todo)
 ├── docker/                     # Target 1 — single-node Docker Compose
-│   ├── docker-compose.yml      # LiteLLM + Langfuse + LibreChat       (todo)
+│   ├── docker-compose.yml      # ★ 9 services, 3 compose profiles
+│   ├── clickhouse-config/      # ★ memory cap for a laptop
+│   ├── postgres-init/          # ★ creates LiteLLM's database
 │   ├── litellm_config.yaml     # ⚙ RENDERED from stack.yaml
 │   └── librechat.yaml          # ⚙ RENDERED from stack.yaml
 ├── terraform/                  # Target 2 — AWS EC2                   (todo)
@@ -270,8 +273,7 @@ Each entry records more than the value — the console URL to get it, the scopes
 ```
 
 ```bash
-./scripts/stack.sh secrets setup           # external keys only
-./scripts/stack.sh secrets generate --phase 1  # internal demo values
+./scripts/stack.sh secrets setup           # d=default credentials, g=generate, w=write
 ./scripts/stack.sh secrets status --all    # no values printed
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # credentials.yaml -> .env
@@ -315,9 +317,7 @@ If a credential does leak, **revoke at the provider first** — rewriting histor
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup          # external keys, grouped by phase
-./scripts/stack.sh secrets generate --phase 1  # internal demo values
-./scripts/stack.sh secrets write          # generate .env (mode 600)
+./scripts/stack.sh secrets setup          # optionally press d, then g and w
 ./scripts/stack.sh doctor
 ```
 
@@ -339,7 +339,7 @@ See [Credentials](#credentials) for the full inventory and how it stays out of g
 | ClickHouse | localhost:8123 | Langfuse trace store |
 | MinIO | http://localhost:9001 | blob store backing Langfuse |
 
-> ⚠️ **`up` exits 1 today** — `docker/docker-compose.yml` has not been written, and writing it *is* Phase 1. See [Pre-Phase-1 confirmation](https://litkhai.github.io/llmops-in-a-box/phases/#pre-phase-1-confirmation).
+That brings up **nine containers on six ports**. For a guided run with a checkpoint after every step, follow the [Workshop](https://litkhai.github.io/llmops-in-a-box/workshop/).
 
 On first setup, the wizard generates Langfuse's project key pair and the
 Compose stack passes it through `LANGFUSE_INIT_*`. Langfuse creates the demo
@@ -487,7 +487,8 @@ Each claim is tagged with the phase that makes it **showable**. Most are not sho
 
 Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phases`.
 
-- [ ] **Phase 1** — `docker-compose.yml`, `demo.py`, `seed_traces.py`
+- [x] **Phase 1 — compose stack** — nine services across the `gateway`, `obs` and `ui` profiles; `up` reaches all-healthy
+- [ ] **Phase 1 — demo scripts** — `demo.py`, `seed_traces.py`
 - [ ] **Phase 2** — MCP tool layer; ClickHouse Cloud server first, traced through the same pipeline
 - [ ] **Phase 3** — RunPod vLLM serving; `runpod/deploy_vllm.md`, `terraform/`
 - [ ] **Phase 4** — MinIO AIStor artifact store (`datasets`, `artifacts`, `weights`), single node
