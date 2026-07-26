@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(./secrets/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.tfvars)",
+      "Read(./**/*.tfstate)",
+      "Read(./**/*.tfstate.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/id_rsa*)",
+      "Read(./**/*credentials*.yaml)",
+      "Read(./**/*credentials*.yml)",
+      "Read(./**/*credentials*.json)"
+    ],
+    "allow": [
+      "Read(./secrets/README.md)",
+      "Read(./secrets/credentials.example.yaml)",
+      "Read(./.env.example)"
+    ]
+  }
+}

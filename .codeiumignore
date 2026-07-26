@@ -1,0 +1,31 @@
+# .codeiumignore — AI assistant exclusions for the Sovereign AI Stack.
+# Generated alongside .gitignore; keep the two in sync.
+
+# ─── Real secrets — never index, never send to a model ───────────────────────
+secrets/
+!secrets/README.md
+!secrets/credentials.example.yaml
+
+.env
+.env.*
+!.env.example
+
+# ─── Terraform state can contain plaintext secrets ───────────────────────────
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ─── Keys and certificates ──────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*credentials*.yaml
+*credentials*.yml
+*credentials*.json
+.aws/
+.ssh/

@@ -1,0 +1,68 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  Secrets — never commit
+#  Mirrored in .dockerignore and the AI-tool ignore files (.cursorignore,
+#  .aiignore, .aiexclude, .codeiumignore, .aiderignore, .continueignore,
+#  .geminiignore, .codexignore) plus .claude/settings.json permissions.deny.
+#  Keep all of them in sync — `./scripts/stack.sh secrets audit` verifies it.
+# ═════════════════════════════════════════════════════════════════════════════
+.env
+.env.*
+!.env.example
+
+secrets/*
+!secrets/README.md
+!secrets/credentials.example.yaml
+
+# Keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*credentials*.yaml
+*credentials*.yml
+*credentials*.json
+!secrets/credentials.example.yaml
+.aws/
+.ssh/
+
+# ─── Rendered from stack.yaml (regenerate: ./scripts/stack.sh render) ────────
+# Committed deliberately so a reader can see the gateway config without running
+# anything. Uncomment if you would rather keep generated files out of git.
+# docker/litellm_config.yaml
+# docker/librechat.yaml
+
+# ─── Terraform ───────────────────────────────────────────────────────────────
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# ─── Python (scripts/) ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.python-version
+
+# ─── Docker / runtime volumes ────────────────────────────────────────────────
+docker/volumes/
+docker/data/
+
+# ─── OS / editor ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

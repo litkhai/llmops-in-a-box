@@ -1,0 +1,27 @@
+# Keep secrets out of any build context — a COPY . . would otherwise bake
+# credentials into an image layer that survives deletion of the file.
+secrets/
+!secrets/credentials.example.yaml
+.env
+.env.*
+!.env.example
+
+*.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.aws/
+.ssh/
+
+.git/
+.github/
+docs/
+**/__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
