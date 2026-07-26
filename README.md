@@ -18,6 +18,19 @@
 
 ---
 
+## AI-assisted development
+
+This project is developed with [OpenAI Codex](https://developers.openai.com/codex/)
+as a coding collaborator for architecture review, implementation, validation,
+and documentation. The human maintainer reviews the changes and remains
+responsible for design decisions, security, and releases.
+
+Repository-specific instructions for Codex live in [`AGENTS.md`](AGENTS.md), so
+the same source-of-truth, secret-handling, validation, and review conventions
+carry across development sessions.
+
+---
+
 ## Why this exists
 
 Enterprises adopting GenAI face the same set of questions:
@@ -205,6 +218,7 @@ Layer dependencies resolve transitively — asking for a layer brings up what it
 
 ```
 .
+├── AGENTS.md                   # ★ repository guidance for Codex collaboration
 ├── stack.yaml                  # ★ single source of truth — layers, models, phases
 ├── .env.example                # secret NAMES with per-phase grouping
 ├── .gitignore                  # + .dockerignore, .cursorignore, .aiignore,
