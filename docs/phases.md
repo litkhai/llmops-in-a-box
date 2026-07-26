@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation
+---
+
 # Build-out phases
 
 The stack is built **frontier-first**: get the gateway, tracing, and UI working against commercial APIs, then add tools, then self-hosting, then storage and memory.

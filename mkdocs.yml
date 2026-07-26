@@ -41,9 +41,12 @@ theme:
   features:
     - navigation.instant
     - navigation.instant.progress
+    # The nav is flat — six top-level pages, no sections. With tabs on, the
+    # left sidebar would render the exact same six entries, so every page sets
+    # `hide: navigation` in its front matter and the tabs are the only nav.
+    # navigation.footer then carries prev/next, which the sidebar used to.
     - navigation.tabs
     - navigation.tracking
-    - navigation.sections
     - navigation.top
     - navigation.footer
     - content.code.copy

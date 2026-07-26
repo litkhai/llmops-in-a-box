@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation
+---
+
 # Configuration
 
 One declarative file describes **what** the stack is. A script decides **where** it runs.

@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation
+---
+
 # Deployment
 
 Two targets, one config. The target is a **flag**, not a fork in the config tree.

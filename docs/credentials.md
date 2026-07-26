@@ -1,3 +1,8 @@
+---
+hide:
+  - navigation
+---
+
 # Credentials
 
 Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse Cloud, Langfuse, MinIO — is inventoried in **one** file.
