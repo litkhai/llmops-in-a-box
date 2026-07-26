@@ -156,7 +156,7 @@ The line to watch is *nodes*, not terabytes: the moment the deployment goes mult
 
 ### Phase 4b — KV-cache offload
 
-:material-alert-outline: **Blocked on hardware — not deployable in this stack**
+:material-lightbulb-outline: **Plan only — the product is not obtainable yet**
 
 `stack.yaml` carries a `memory` layer with `impl: memkv`. Reading [MinIO's MemKV page](https://www.min.io/product/memkv) against what the config actually declares turns up a mismatch worth recording rather than quietly shipping.
 
@@ -165,6 +165,8 @@ The line to watch is *nodes*, not terabytes: the moment the deployment goes mult
 **What it needs.** It runs as a single binary on NVIDIA STX-based systems, accelerated by NVIDIA Vera CPUs, built for Spectrum-X 800 GbE networking and PCIe Gen6.
 
 That is not something a `docker compose up` on a laptop, or a single RunPod pod, can host. It is a GPU-fleet-scale component, and no amount of config makes it a Phase 4 container.
+
+**And it cannot be evaluated at any budget.** The product page carries no general-availability statement, no download, no trial, no free or developer edition — the only two calls to action are *"Talk to a Specialist"* and *"Get Pricing"*. It gives no ship date, and neither does it cite one for the NVIDIA hardware it depends on. So this is not "expensive to try": there is currently nothing to try. Worth being precise about, because "blocked on hardware" implies a purchase order would fix it, and it would not.
 
 **And it is not a semantic cache.** `stack.yaml` currently declares `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. Those settings describe a different mechanism:
 
@@ -177,10 +179,12 @@ That is not something a `docker compose up` on a laptop, or a single RunPod pod,
 | Correctness risk | can serve a near-miss answer as if exact | none — identical math |
 | Fits this stack | yes, LiteLLM supports it natively | no, needs STX-class hardware |
 
-!!! warning "This needs a decision, not a config change"
-    The two are worth having, but they are separate items at different scales. A semantic cache is a Phase 4-sized addition that LiteLLM can do today with a Redis backend. MemKV belongs on the roadmap as the scale-out path for when there is a real GPU fleet under Phase 3 — with its hardware prerequisites stated up front, so it never reads as one flag away.
+!!! note "Decided: this stays a plan"
+    Phase 4b is documentation, not a build target. It is here so the architecture has an honest answer for *"what happens to KV cache at fleet scale?"* — and so nobody reads the `memory` layer in `stack.yaml` as one `enabled: true` away from working.
 
-    Nothing has been silently rewired. `stack.yaml` still declares the layer as it did; only the comments now say what the product actually is.
+    Nothing has been silently rewired. `stack.yaml` still declares the layer as it did; only the comments now say what the product actually is, and it belongs to no phase or profile.
+
+    Two things that would be buildable if this ever becomes a priority, recorded so the research is not lost: a **semantic cache** is a different mechanism entirely and LiteLLM supports it today with a Redis backend; and **KV-cache reuse** itself is available in open source — vLLM's built-in prefix caching, and [LMCache](https://github.com/lmcache/lmcache) for offload to CPU, disk, or S3-compatible storage. Neither is scheduled.
 
 ---
 

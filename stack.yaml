@@ -355,16 +355,23 @@ layers:
   #  Spectrum-X 800 GbE, PCIe Gen6. There is no compose service that stands
   #  this up, and a single RunPod pod cannot host it. `managed_by: compose`,
   #  `port: 9200` and the health check in observability.checks are all
-  #  therefore wrong; they are left in place rather than invented anew,
-  #  because the right fix is a decision, not an edit.
+  #  therefore wrong; they are annotated in place rather than invented anew.
   #
-  #  A semantic cache — embed the prompt, serve a stored response above a
-  #  similarity threshold — IS worth having and IS buildable here: LiteLLM
-  #  supports it natively with a Redis backend. It is a separate item from
-  #  MemKV, at a completely different scale, and should be declared as its
-  #  own layer rather than borrowing this one's name.
+  #  And it cannot be evaluated at any budget: the product page states no
+  #  general availability, offers no download, trial or developer edition,
+  #  and gives no ship date — for MemKV or for the NVIDIA hardware it needs.
+  #  The only calls to action are "Talk to a Specialist" and "Get Pricing".
   #
-  #  Left out of every phase and every profile until that split is decided.
+  #  DECIDED: this stays a plan. Not scheduled, in no phase, in no profile.
+  #  Kept declared so the architecture has an honest answer for what happens
+  #  to KV cache at fleet scale, and so nobody reads this layer as one
+  #  `enabled: true` away from working.
+  #
+  #  If it ever becomes a priority, two buildable things — neither scheduled:
+  #    • semantic cache (different mechanism): LiteLLM does this natively
+  #      with a Redis backend, and would want its own layer, not this name
+  #    • KV-cache reuse (same mechanism, open source): vLLM's built-in
+  #      prefix caching, and LMCache for offload to CPU/disk/S3-compatible
   memory:
     phase: null                 # was 4 — see above
     enabled: false

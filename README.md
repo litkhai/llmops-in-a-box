@@ -48,7 +48,7 @@ The stack is built **frontier-first**: get the gateway, tracing, and UI working 
 | **4** | **Artifact storage** — a MinIO AIStor instance for datasets, eval artifacts and weights, separate from the blob store Langfuse runs for itself. AIStor Free is single-node with no capacity limit, so this phase costs nothing. | `storage` | planned |
 | **5** | **Operating recipes** — context-based routing in LiteLLM, LibreChat Agents over the MCP tools, Langfuse evals. Adds no layers. | — | planned |
 
-> **On MemKV.** The `memory` layer is declared in `stack.yaml` but belongs to no phase. [MinIO MemKV](https://www.min.io/product/memkv) is a KV-cache offload tier for AI inference — attention blocks from GPU memory to NVMe over RDMA — and it requires NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It is not a semantic cache and not a container. See [Build-out phases](docs/phases.md) for the distinction and what to do instead.
+> **On MemKV.** The `memory` layer is declared in `stack.yaml` but belongs to no phase, and is **plan only**. [MinIO MemKV](https://www.min.io/product/memkv) is a KV-cache offload tier for AI inference — attention blocks from GPU memory to NVMe over RDMA — requiring NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It is not a semantic cache, not a container, and as of now not obtainable: no GA, no trial, no ship date. See [Build-out phases](docs/phases.md).
 
 ```bash
 ./scripts/stack.sh phases      # which phase is current, and what each adds
@@ -465,8 +465,10 @@ Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phas
   - [ ] context-based routing in LiteLLM (`context_window_fallbacks`), verified in the Langfuse cost report
   - [ ] a LibreChat Agent driving the ClickHouse MCP server, producing nested tool-call traces
   - [ ] Langfuse evals — LLM-as-judge over a dataset built from real traces, scored across all three models
-- [ ] **Semantic cache** — LiteLLM's native Redis-backed response cache. Distinct from MemKV; needs its own layer rather than borrowing `memory`
-- [ ] **MemKV** — KV-cache offload. Blocked on NVIDIA STX-class hardware; roadmap item for a real GPU fleet, not a compose service
+- **Not scheduled** — recorded so the research isn't repeated, deliberately not build targets:
+  - *MemKV* — KV-cache offload. Plan only: no GA, no download or trial, no ship date, and dependent on unreleased NVIDIA STX hardware. Not a purchase-order problem
+  - *Semantic cache* — a different mechanism; LiteLLM does it natively with Redis and would want its own layer, not `memory`'s name
+  - *KV-cache reuse in open source* — vLLM prefix caching, [LMCache](https://github.com/lmcache/lmcache) for offload to CPU/disk/S3-compatible storage
 - [ ] **Kubernetes target** — Helm profile (`targets.k8s`, currently `enabled: false`)
 
 ---
