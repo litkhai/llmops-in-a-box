@@ -7,6 +7,15 @@
 
 📖 **[Documentation site →](https://litkhai.github.io/llmops-in-a-box/)**
 
+| | |
+|---|---|
+| [**Background**](https://litkhai.github.io/llmops-in-a-box/background/) | why a gateway is the load-bearing decision, what was considered at each layer, why ClickHouse sits under Langfuse, what 망분리 / ISMS-P require, and a glossary |
+| [**Build-out phases**](https://litkhai.github.io/llmops-in-a-box/phases/) | the build order, what each phase proves, and what is deliberately not scheduled |
+| [**Configuration**](https://litkhai.github.io/llmops-in-a-box/configuration/) | how one `stack.yaml` and one script describe the whole stack |
+| [**Deployment**](https://litkhai.github.io/llmops-in-a-box/deployment/) | laptop and EC2, prerequisites, troubleshooting |
+| [**Credentials**](https://litkhai.github.io/llmops-in-a-box/credentials/) | every key, its scope, owner and rotation cadence |
+| [**Demo flow**](https://litkhai.github.io/llmops-in-a-box/demo-flow/) | a ten-minute walkthrough with talking points |
+
 ---
 
 ## Why this exists
@@ -28,9 +37,10 @@ This repository is a **reference architecture + deployment scripts** that answer
 ├─ Serving ────────── vLLM                              Phase 3
 ├─ Models ─────────── Self-hosted (Qwen, EXAONE, ...)   Phase 3
 ├─ Compute ────────── RunPod / AWS                      Phase 3
-└─ Storage ────────── MinIO AIStor (free at one node)   Phase 4
+└─ Storage ────────── MinIO AIStor — artifacts + KV cache  Phase 4
+                      (object store: free at one node)
 
-   Operating recipes ─ context routing · agents · evals  Phase 5
+   Operating recipes ─ context routing · agents · evals    Phase 5
    (no new layers — things to do with the stack above)
 ```
 
@@ -45,10 +55,14 @@ The stack is built **frontier-first**: get the gateway, tracing, and UI working 
 | **1** | **Frontier models** — LiteLLM + Langfuse + LibreChat against OpenAI and Anthropic. No GPU required. | `gateway`, `observability`, `ui` | 🚧 in progress |
 | **2** | **MCP tool layer** — MCP servers behind the gateway so tool calls are traced through the same pipeline. First server is ClickHouse Cloud — settled, not a shortlist. | `tools` | planned |
 | **3** | **Self-hosted serving** — vLLM on a RunPod GPU pod alongside the APIs, in one Langfuse project. | `serving`, `qwen-7b` | planned |
-| **4** | **Artifact storage** — a MinIO AIStor instance for datasets, eval artifacts and weights, separate from the blob store Langfuse runs for itself. AIStor Free is single-node with no capacity limit, so this phase costs nothing. | `storage` | planned |
+| **4** | **Storage & large context** — a MinIO AIStor instance for datasets, eval artifacts and weights, separate from the blob store Langfuse runs for itself. Doubles as the offload tier for KV-cache reuse, which is what makes long shared prompts affordable. AIStor Free is single-node with no capacity limit, so the **object store** costs nothing. | `storage` | planned |
 | **5** | **Operating recipes** — context-based routing in LiteLLM, LibreChat Agents over the MCP tools, Langfuse evals. Adds no layers. | — | planned |
 
-> **On MemKV.** The `memory` layer is declared in `stack.yaml` but belongs to no phase, and is **plan only**. [MinIO MemKV](https://www.min.io/product/memkv) is a KV-cache offload tier for AI inference — attention blocks from GPU memory to NVMe over RDMA — requiring NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It is not a semantic cache, not a container, and as of now not obtainable: no GA, no trial, no ship date. See [Build-out phases](docs/phases.md).
+> **On KV-cache offload, and MemKV specifically.** The capability — prefill a long shared prefix once and reuse it instead of recomputing it per request — splits into two tracks.
+>
+> **Buildable now:** vLLM's prefix caching, then [LMCache](https://github.com/lmcache/lmcache) to move that cache off the GPU to CPU, disk or **S3-compatible storage** — which is to say, the Phase 4 AIStor instance. One pod, one flag, no vendor conversation.
+>
+> **Partnership track:** [MinIO MemKV](https://www.min.io/product/memkv) does the same thing at fleet scale over RDMA, and needs NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It has no GA, no trial and no download — only *"Talk to a Specialist"* and *"Get Pricing"* — so the next step there is **opening a partnership discussion with MinIO**, not an install. Note it is a separate product from AIStor: the free-at-one-node tier does **not** extend to it. See [Build-out phases](docs/phases.md).
 
 ```bash
 ./scripts/stack.sh phases      # which phase is current, and what each adds

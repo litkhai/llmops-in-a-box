@@ -21,6 +21,7 @@ LiteLLM · LibreChat · Langfuse · vLLM · OpenAI · Anthropic · RunPod · AWS
 
 [Get started](deployment.md){ .md-button .md-button--primary }
 [See the phases](phases.md){ .md-button }
+[Background](background.md){ .md-button }
 
 </div>
 
@@ -141,6 +142,8 @@ $EDITOR secrets/credentials.yaml     # paste those + your provider keys
 
 Continue with [Deployment](deployment.md), or read [Configuration](configuration.md) for how `stack.yaml` and `stack.sh` fit together.
 
+For the reasoning underneath all of it — why a gateway is the load-bearing decision, what was considered at each layer and rejected, why ClickHouse sits under Langfuse, what 망분리 and ISMS-P actually require, and a glossary of the terms these docs assume — see [Background](background.md).
+
 ---
 
 ## What this demonstrates
@@ -157,6 +160,7 @@ Every claim below is tagged with the phase that makes it **showable**, because m
     - **Ease of deployment** <span class="phase phase-3">Phase 3</span> — a vLLM template on RunPod is live in minutes versus EC2 GPU setup (AMI, drivers, networking). The rest is one `stack.sh up`.
     - **Fast cold-start** <span class="phase phase-3">Phase 3</span> — RunPod pods spin up in seconds versus minutes-long cloud GPU provisioning.
     - **GPU cost efficiency** <span class="phase phase-3">Phase 3</span> — per-second billing with zero idle cost when stopped, typically 2–3× cheaper than on-demand cloud GPU pricing. The *self-hosted versus API* comparison needs a self-hosted model to compare against, so it arrives with this phase, not before.
+    - **Large context stops being priced per request** <span class="phase phase-4">Phase 4</span> — a long shared prefix (a system prompt, a policy document, a codebase) is prefilled once and reused instead of recomputed on every call. vLLM does this in GPU memory; LMCache offloads the cache to CPU, disk or the Phase 4 object store so it survives restarts and outgrows GPU memory. LMCache's published figure for a 128K-token prompt on an H100 is TTFT ~11s cold against ~1.5s on a cache hit.
 
 === "Architecture"
 
@@ -165,9 +169,11 @@ Every claim below is tagged with the phase that makes it **showable**, because m
     - **Traced tool calls** <span class="phase phase-2">Phase 2</span> — the same applies to MCP-based agents: tool calls land in Langfuse beside the completion that triggered them.
     - **Composability** <span class="phase phase-3">Phase 3</span> — every layer swaps out: vLLM → SGLang/TGI, RunPod → AWS/on-prem GPU, LibreChat → your own app. Swapping the serving layer only becomes a demonstration once there is one.
     - **Incremental adoption** <span class="phase phase-3">Phase 3</span> — the [phase profiles](phases.md) are the argument, and the argument completes when the same config has actually carried the stack from APIs-only to self-hosted without a rewrite.
+    - **An artifact store you own** <span class="phase phase-4">Phase 4</span> — datasets, eval artifacts and weights in a separate instance from the blob store Langfuse runs for itself, so your data lifecycle is not coupled to another product's schema and retention. The same instance backs the KV cache, so one store serves both.
 
 === "Enterprise fit"
 
     - **Scale story** <span class="phase phase-1">Phase 1</span> — Langfuse's ClickHouse backend handles production trace volume; the same architecture extends from a laptop demo to millions of traces per day.
     - **Gradual adoption** <span class="phase phase-1">Phase 1</span> — start with commercial APIs behind the gateway, with one observability pane from the first request.
     - **Sovereignty & compliance** <span class="phase phase-3">Phase 3</span> — the full path (UI → gateway → model → traces) inside your own network boundary, for regulated and air-gapped environments including Korean 망분리 / ISMS-P contexts. `--profile airgapped` enforces no commercial API egress — but it requires a self-hosted model to fall back to, so **Phase 1 egresses every request to OpenAI or Anthropic**. Worth stating plainly rather than letting the architecture diagram imply otherwise.
+    - **Long internal documents never leave** <span class="phase phase-4">Phase 4</span> — the workloads that most want a 100k-token context are usually the ones you least want to send out: contracts, policy manuals, source code, incident history. Self-hosted serving plus KV-cache reuse makes processing them repeatedly affordable *inside* the boundary, which is the combination that turns "we cannot use long context" into a capacity question. See [Background](background.md#the-cross-border-question) for why the transfer question is the one that decides it.

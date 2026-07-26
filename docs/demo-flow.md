@@ -1,8 +1,3 @@
----
-hide:
-  - navigation
----
-
 # Demo flow
 
 A ten-minute walkthrough. The arc is **config → traffic → observability → the ClickHouse close**.

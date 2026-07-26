@@ -41,11 +41,13 @@ theme:
   features:
     - navigation.instant
     - navigation.instant.progress
-    # The nav is flat — six top-level pages, no sections. With tabs on, the
-    # left sidebar would render the exact same six entries, so every page sets
-    # `hide: navigation` in its front matter and the tabs are the only nav.
-    # navigation.footer then carries prev/next, which the sidebar used to.
+    # The nav is grouped into sections, so tabs show the four sections and the
+    # left sidebar shows the pages inside the active one. Those are different
+    # lists, which is what stops the sidebar from being a second copy of the
+    # tabs — the problem a flat nav had. Only index.md hides the sidebar, being
+    # a landing page with nothing to sit beside it.
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.tracking
     - navigation.top
     - navigation.footer
@@ -64,11 +66,15 @@ extra_css:
 
 nav:
   - Overview: index.md
-  - Build-out phases: phases.md
-  - Configuration: configuration.md
-  - Deployment: deployment.md
-  - Credentials: credentials.md
-  - Demo flow: demo-flow.md
+  - Understand:
+      - Background: background.md
+      - Build-out phases: phases.md
+  - Build:
+      - Configuration: configuration.md
+      - Deployment: deployment.md
+      - Credentials: credentials.md
+  - Present:
+      - Demo flow: demo-flow.md
 
 markdown_extensions:
   - abbr
@@ -80,7 +86,10 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-      toc_depth: 3
+      # 4, not 3. The phase sub-sections and the Phase 5 recipes are h4, and at
+      # depth 3 they were absent from the table of contents entirely — on pages
+      # this long that is most of what a reader is trying to jump to.
+      toc_depth: 4
   - pymdownx.details
   - pymdownx.inlinehilite
   - pymdownx.snippets

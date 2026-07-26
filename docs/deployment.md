@@ -1,8 +1,3 @@
----
-hide:
-  - navigation
----
-
 # Deployment
 
 Two targets, one config. The target is a **flag**, not a fork in the config tree.
@@ -68,10 +63,17 @@ Everything except GPU serving runs locally in one compose stack.
 
 ### First-time setup
 
+!!! tip "Prefer headless initialization — it makes this a single pass"
+    Langfuse can create the org, project, user and **key pair** on first boot from `LANGFUSE_INIT_*` variables, so you choose the keys instead of fetching them and the gateway comes up with tracing already working. See [Credentials](credentials.md#kind-3-the-langfuse-keys-which-look-like-an-ordering-trap-and-are-not) and Langfuse's [Headless Initialization](https://langfuse.com/self-hosting/administration/headless-initialization) guide.
+
+The manual route, if you are not using headless init:
+
 1. Open Langfuse → create an org and project → copy the public and secret keys.
 2. Paste them into `secrets/credentials.yaml`, then `./scripts/stack.sh secrets write`.
 3. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys.
 4. Verify: `./scripts/stack.sh status`
+
+Step 3 is not optional: LiteLLM reads the Langfuse keys at startup, so a gateway that booted before the keys existed will run fine and trace nothing.
 
 ```console
 $ ./scripts/stack.sh status
