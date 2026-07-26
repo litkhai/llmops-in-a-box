@@ -62,7 +62,49 @@ LiteLLM gateway, Langfuse observability, and LibreChat against OpenAI and Anthro
 ./scripts/stack.sh up --profile phase-1     # the default
 ```
 
-The deliverable is a working trace pipeline: send a prompt to two different providers through one endpoint and see both traces, with correct per-model cost, in a single Langfuse project.
+#### What actually comes up
+
+Three layers, seven containers. The gap is worth knowing before the first `docker compose up` — Langfuse v3 is not one service.
+
+| Service | Port | Role |
+|---|---|---|
+| LiteLLM | 4000 | the gateway — one OpenAI-compatible endpoint |
+| Langfuse | 3000 | traces, cost, the dashboard you demo from |
+| LibreChat | 3080 | chat UI, model picker rendered from the catalog |
+| ClickHouse | 8123 · 9000 | Langfuse's OLAP trace storage |
+| Postgres | 5432 | Langfuse metadata, users, projects |
+| Redis | 6379 | Langfuse queue and cache |
+| MinIO | 9001 · 9002 | Langfuse event-upload blob store |
+
+The last four are **internal dependencies of the observability layer**, not separate layers you chose. They come up on the `obs` compose profile. In particular this MinIO is Langfuse's own — it is not the Phase 4 artifact store, which is a different instance on different ports.
+
+#### The two models
+
+| Alias | Model | Context | $/1k in | $/1k out |
+|---|---|--:|--:|--:|
+| `gpt-4o` | `openai/gpt-4o` | 128k | 0.0025 | 0.010 |
+| `claude-sonnet` | `anthropic/claude-sonnet-4-5` | 200k | 0.003 | 0.015 |
+
+Both are declared once in `stack.yaml` and rendered into *both* `litellm_config.yaml` (routing and cost) and `librechat.yaml` (the picker). Two providers with different wire formats behind one endpoint is the point — LiteLLM translates, so the application sees only the OpenAI shape.
+
+#### Gateway settings that matter
+
+```yaml
+num_retries: 2
+request_timeout_s: 600
+drop_params: true          # tolerate params a given provider rejects
+budget: { max_budget_usd: 50, duration: 30d }
+callbacks: { success: [langfuse], failure: [langfuse] }
+```
+
+`drop_params` is what keeps one client working across two providers when they disagree on a parameter. The **failure** callback matters as much as the success one: a demo where errors vanish from the trace view is a demo that cannot answer "what happens when it breaks".
+
+#### The deliverable
+
+Send the same prompt to both providers through one endpoint, then open one Langfuse project and see both traces with correct per-model cost. That single screen is the architectural claim: the application did not know which provider it was talking to, and the cost report did.
+
+!!! warning "Phase 1 has no data boundary"
+    Every request in this phase leaves for OpenAI or Anthropic. The gateway, the tracing and the cost attribution are all real, but sovereignty is not — that arrives in Phase 3 with a self-hosted model to route to. Do not demo this phase to a regulated-industry audience as if the network boundary already held.
 
 ---
 
@@ -89,8 +131,27 @@ The first server is **ClickHouse Cloud** — this is settled, not a shortlist. A
 ./scripts/stack.sh up --profile phase-2
 ```
 
+#### Why route tools through the gateway
+
+Tool calls are usually instrumented wherever the agent framework happens to live. That produces two telemetry systems that have to be joined by hand — and the join is exactly the question you want answered.
+
+| | Tools instrumented in the app | Tools through the gateway |
+|---|---|---|
+| Where telemetry lands | the agent framework's own tracing | the same Langfuse project as completions |
+| Cost of a multi-step run | sum it yourself across systems | one trace, one total |
+| Switching frameworks | re-instrument | nothing changes |
+| A failed tool call | often invisible to the LLM trace | a failed span next to the completion that caused it |
+
+#### The trace shape
+
+One request produces one trace with nested spans: the planning completion, each MCP tool call with its arguments and result, and the final completion. Per-step latency and cost sit on the same timeline. A multi-step agent is where per-request cost stops being obvious, which is why this is the interesting thing to trace rather than a nice-to-have.
+
+#### The deliverable
+
+Ask a question that genuinely requires the warehouse — one an LLM cannot answer from training data, like a count over your own tables. The answer should be correct, and the trace should show the SQL the agent actually ran. That second half is what makes the demo credible to a data team.
+
 !!! warning "Scope the tool credential, not just the agent"
-    An agent holding a tool has that credential's full grants. Create a dedicated **read-only** ClickHouse Cloud user for the MCP server — never reuse the admin account. See [Credentials](credentials.md).
+    An agent holding a tool has that credential's full grants. Prompt-level instructions are not an access control. Create a dedicated **read-only** ClickHouse Cloud user for the MCP server — never reuse the admin account — and confirm the grants before letting a model drive it. `scopes: [read_only]` in `stack.yaml` documents the intent; the database is what enforces it. See [Credentials](credentials.md).
 
 ---
 
@@ -106,9 +167,41 @@ vLLM on a RunPod GPU pod behind the same gateway, so self-hosted and commercial 
 ./scripts/stack.sh up --profile phase-3
 ```
 
-`stack.yaml` declares a `qwen-7b → gpt-4o` fallback, so a cold or stopped pod degrades to an API model instead of erroring. The renderer **prunes that fallback automatically** when the target model isn't in the active profile — so `--profile airgapped` cannot silently egress to a commercial API.
+#### The one layer that is not a container
 
-Korean-workload alternatives (EXAONE-3.5, EEVE-Korean) are declared under `layers.serving.options.alternatives`.
+Every other layer is a compose service. This one is not:
+
+```yaml
+managed_by: runpod          # NOT a compose service — lives on a GPU pod
+compose_profile: null
+enabled: true               # nothing to scaffold here; the pod is provisioned
+                            # in the RunPod console
+```
+
+`enabled: true` with nothing in this repo to start is deliberate. `--profile phase-3` works the moment `VLLM_API_BASE` points at a live pod — the gateway does not care that the model is somewhere else, which is the whole argument for putting routing at the gateway.
+
+| | |
+|---|---|
+| GPU | 1× A40 or L40S — sufficient for a 7B model |
+| Model | `Qwen/Qwen2.5-7B-Instruct` |
+| Context | 32,768 |
+| Precision | bfloat16 |
+| Port | 8000 |
+
+Korean-workload alternatives are declared under `layers.serving.options.alternatives`: `LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct` and `yanolja/EEVE-Korean-Instruct-10.8B-v1.0`.
+
+#### Degrading instead of erroring
+
+`stack.yaml` declares a `qwen-7b → gpt-4o` fallback, so a cold or stopped pod serves an API model rather than a 500. The renderer **prunes that fallback automatically** when the target model isn't in the active profile — so `--profile airgapped` cannot silently egress to a commercial API. The safety property is enforced by config generation, not by remembering to be careful.
+
+Note the context asymmetry while you are here: `qwen-7b` has a 32k window and `gpt-4o` has 128k. Falling back is not always a like-for-like substitution, which is what makes context-based routing a [Phase 5](#phase-5-operating-recipes) topic rather than a footnote.
+
+#### The deliverable
+
+Same prompt, three models — `gpt-4o`, `claude-sonnet`, `qwen-7b` — one Langfuse project, one cost axis. The self-hosted model is declared at `cost_per_1k: 0`, deliberately, so API spend shows against a zero-marginal-cost baseline.
+
+!!! warning "Zero marginal cost is not zero cost"
+    `cost_per_1k: 0` makes per-token comparison legible, but the pod bills by the second whether or not anything is inflight, and Langfuse never sees that number. Comparing a $0 self-hosted trace against a $0.03 API trace without naming the GPU hourly rate and the utilisation behind it overstates the case — and it is the first thing a competent buyer will ask. Bring the pod cost to the meeting separately; the break-even is a volume question, not a per-token one.
 
 ---
 
