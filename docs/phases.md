@@ -35,7 +35,7 @@ Phase 1 has not started. This is the verified state of the repository before it 
 | Gap | Consequence |
 |---|---|
 | **`docker/docker-compose.yml` does not exist** | `stack.sh up` exits 1. Never committed; there is no generator for it, so it is hand-written work |
-| Phase 1 credentials are not configured | `doctor` exits 1 on missing provider or gateway keys. Use `secrets setup --phase 1`, then `secrets generate --phase 1` |
+| Phase 1 credentials are not configured | `doctor` exits 1 on missing gateway keys. Use external-only `secrets setup --phase 1`, then `secrets generate --phase 1` for internal values |
 | `terraform/` is not scaffolded | `--target aws-ec2` exits 1 with a clear message |
 
 !!! info "`up` fails cleanly, and that was designed"
@@ -51,7 +51,7 @@ Phase 1 has not started. This is the verified state of the repository before it 
 ### What starting Phase 1 actually requires
 
 1. Write `docker/docker-compose.yml` — seven services across the `gateway`, `obs` and `ui` compose profiles
-2. `./scripts/stack.sh secrets setup --phase 1` for external keys, then `secrets generate --phase 1` for local values
+2. `./scripts/stack.sh secrets setup --phase 1` for external keys, then `secrets generate --phase 1` for internal demo values
 3. `./scripts/stack.sh doctor` green, then `up`, then `status`
 
 Nothing else in the repository is in the way.

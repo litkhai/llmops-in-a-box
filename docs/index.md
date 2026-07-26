@@ -133,8 +133,8 @@ flowchart TB
 brew install yq
 
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup     # choose a phase; enter external keys
-./scripts/stack.sh secrets generate --phase 1  # local passwords/signing keys
+./scripts/stack.sh secrets setup     # external keys only
+./scripts/stack.sh secrets generate --phase 1  # internal demo values
 ./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh secrets write     # generate .env (mode 600)
 

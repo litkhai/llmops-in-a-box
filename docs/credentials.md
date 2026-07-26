@@ -31,7 +31,7 @@ overwritten**. Neither command prints secret values.
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # choose Phase 1..5; enter external keys
+./scripts/stack.sh secrets setup           # all external keys, grouped by phase
 ./scripts/stack.sh secrets status --all    # set / missing / invalid, no values
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # atomic .env write, mode 600
@@ -65,15 +65,19 @@ Each entry's `console:` field in `secrets/credentials.yaml` is the authoritative
 
 These are passwords for services this stack runs itself. Nobody issues them to you; you invent them, and `secrets generate` creates and stores stronger values without printing them.
 
-`LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `NEXTAUTH_SECRET` · `LANGFUSE_SALT` · `CLICKHOUSE_PASSWORD` · `POSTGRES_PASSWORD` · `MINIO_ROOT_PASSWORD` · `ARTIFACT_MINIO_ROOT_USER` · `ARTIFACT_MINIO_ROOT_PASSWORD` · `VLLM_API_KEY`
+`LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `LANGFUSE_PUBLIC_KEY` ·
+`LANGFUSE_SECRET_KEY` · `NEXTAUTH_SECRET` · `LANGFUSE_SALT` ·
+`LANGFUSE_ENCRYPTION_KEY` · `REDIS_AUTH` · `CLICKHOUSE_PASSWORD` ·
+`POSTGRES_PASSWORD` · `MINIO_ROOT_PASSWORD` ·
+`LIBRECHAT_CREDS_KEY` · `LIBRECHAT_CREDS_IV` · `LIBRECHAT_JWT_SECRET` ·
+`LIBRECHAT_JWT_REFRESH_SECRET` · `ARTIFACT_MINIO_ROOT_USER` ·
+`ARTIFACT_MINIO_ROOT_PASSWORD` · `VLLM_API_KEY`
 
 ```bash
 ./scripts/stack.sh secrets generate --phase 1
 ```
 
 `VLLM_API_KEY` is in this list for a reason worth noticing: it is not issued by RunPod. You choose a value and pass it to `vllm serve --api-key` — see vLLM's [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) docs. That is what makes it easy to skip, and skipping it leaves [an open GPU on the internet](#security-posture).
-
-With [headless initialization](#kind-3-the-langfuse-keys-which-look-like-an-ordering-trap-and-are-not), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` belong in this list too — you choose them rather than fetch them.
 
 ### Kind 2 — a provider console (you need an account, possibly a payment method)
 
@@ -83,33 +87,38 @@ Each row links the **vendor's own guide**, not just the console, because the con
 |---|---|---|---|---|
 | `OPENAI_API_KEY` | [API authentication](https://platform.openai.com/docs/api-reference/authentication/api-keys) · [reference overview](https://developers.openai.com/api/reference/overview#authentication) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | a project-scoped key | shown **once**. A project with no credit returns 429 on the first call, which reads exactly like a bad key |
 | `ANTHROPIC_API_KEY` | [Get started with Claude](https://docs.anthropic.com/en/docs/initial-setup) · [API overview](https://docs.anthropic.com/en/api/getting-started) | [console.anthropic.com](https://console.anthropic.com) | a workspace key, in Account Settings | also shown once, and you pick an **expiry date** at creation — a key that worked last quarter may simply have lapsed |
+| `LANGFUSE_EE_LICENSE_KEY` | [Enterprise license key](https://langfuse.com/self-hosting/license-key) | Langfuse commercial agreement | the self-hosted license key | optional; leave blank to run the OSS feature set |
 | `RUNPOD_API_KEY` | [Manage API keys](https://docs.runpod.io/get-started/api-keys) | Settings → API Keys | permission **Read Only** unless the script must start pods | RunPod does not store the key — if you lose it, you create a new one. Needs account balance before a pod starts. Phase 3 only |
 | `CLICKHOUSE_CLOUD_HOST` / `_USER` / `_PASSWORD` | [Manage database users](https://clickhouse.com/docs/cloud/security/manage-database-users) · [Common access management queries](https://clickhouse.com/docs/cloud/security/common-access-management-queries) · [`CREATE USER`](https://clickhouse.com/docs/sql-reference/statements/create/user) | [clickhouse.cloud](https://clickhouse.cloud) → service → Settings | a **dedicated read-only user**, not an SQL-console login | an agent holding this has its full grants. Note SQL console statements run as `sql-console:<your-email>`, *not* as the user you create — so test the grants with the real credential, not in the console |
-| AWS | [IAM Identity Center + CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) | `aws configure sso` | an SSO profile | prefer SSO. Leave the static key variables blank and Terraform picks up `AWS_PROFILE` |
+| AWS | [IAM Identity Center + CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) | `aws configure sso` | an SSO profile, or a scoped static key pair where SSO is unavailable | prefer SSO. Leave the static key variables blank when using `AWS_PROFILE` |
 
-### Kind 3 — the Langfuse keys, which look like an ordering trap and are not
+### Kind 3 — Langfuse keys initialized with the demo
 
 `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY`
 
-The obvious path is: bring Langfuse up, open <http://localhost:3000>, create an organisation and project, copy the key pair out of project settings. That works, and it is what [Deployment](deployment.md#first-time-setup) currently describes.
+LiteLLM needs the Langfuse key pair when it starts. Waiting for a user to open
+the UI and create a project would therefore require a fragile two-pass setup.
+The Phase 1 Compose file instead uses Langfuse headless initialization, and the
+wizard generates the project key pair as internal demo defaults.
 
-It also creates a real ordering problem. LiteLLM reads the Langfuse keys **at startup** to configure its callbacks, so on a first run the gateway starts before the keys exist and traces silently do not appear — which is the single most common "nothing is broken but nothing works" symptom in this stack.
-
-!!! tip "Headless initialization removes the two-pass dance entirely"
-    Langfuse can create the org, project, user **and the key pair** on first boot from environment variables — see [Headless Initialization](https://langfuse.com/self-hosting/administration/headless-initialization). You choose the keys instead of collecting them:
+!!! tip "Headless initialization removes the two-pass dance"
+    Langfuse creates the organization, project, and key pair on first boot from
+    environment variables:
 
     ```bash
     LANGFUSE_INIT_ORG_ID=llmops
     LANGFUSE_INIT_PROJECT_ID=sovereign-ai-stack
-    LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-...      # you pick these
-    LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-...      # same generator as any other secret
-    LANGFUSE_INIT_USER_EMAIL=you@example.com
-    LANGFUSE_INIT_USER_PASSWORD=...
+    LANGFUSE_INIT_PROJECT_PUBLIC_KEY=lf_pk_...
+    LANGFUSE_INIT_PROJECT_SECRET_KEY=lf_sk_...
     ```
 
-    That moves both keys out of kind 3 and into **kind 1** — generated, not fetched — so the whole stack can come up correctly in one pass with no browser trip. `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are then simply set to the same values.
+    `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` use those same values, so
+    tracing is configured from the first gateway start.
 
-    Caveats worth knowing: the variables only take effect **if the resources do not already exist**, so this initialises rather than reconciles; an org must be initialised before a project or user; `ORG_ID`, `PROJECT_ID`, both project keys, and the user's email and password are the required ones; and in Compose the values must not be double-quoted.
+    The variables initialize rather than reconcile: they only take effect when
+    the resources do not exist. A project requires its organization and both
+    project keys. The user email and password are required only when also
+    creating an initial user.
 
     This is the recommended path for this stack and the UI route is the fallback. Where a `.env` cannot hold them, note that Langfuse also documents a [public API](https://langfuse.com/docs/api-and-data-platform/features/public-api) and [SCIM/Org API](https://langfuse.com/docs/administration/scim-and-org-api) for provisioning. If you are ever unsure where a key lives, Langfuse has a page for exactly that question: [Where do I find my API keys?](https://langfuse.com/faq/all/where-are-langfuse-api-keys)
 
@@ -125,12 +134,21 @@ It also creates a real ordering problem. LiteLLM reads the Langfuse keys **at st
 For **Phase 1** — the only phase that runs today — start with the phase-aware
 wizard. It shows the state of every key, then accepts only externally issued
 or provisioned values with hidden input and immediate format validation.
-Local passwords and signing keys are a separate `secrets generate --phase 1`
-step, so generation never obscures the wizard's main purpose.
+The wizard never creates or changes internal credentials. Local passwords,
+signing keys, and self-hosted Langfuse project keys are handled separately by
+`secrets generate --phase 1`.
 
-Phases 2–4 add credentials, but the wizard and status commands can select one
-phase at a time, so later-phase values are never in your way early. Phase 5 is
-made from recipes over existing layers and currently adds no credentials.
+The wizard opens directly on a two-level menu. The top level contains
+**AWS authentication** followed by the workload phase groups. Users deploying
+only with Docker can simply ignore the AWS group; choosing a deployment target
+is a concern of `stack.sh up`, not credential entry. Selecting a group opens its
+credentials, and `b` returns to the group menu after any action. Phases that add
+no external credentials are omitted.
+
+The AWS group accepts either an `AWS_PROFILE` for SSO or both halves of a
+static key pair. Its status reports the selected method instead of treating all
+three fields as required. It remains visible with `--phase N`, because AWS
+authentication is independent of the workload phase.
 
 ---
 
@@ -153,25 +171,27 @@ So the classification is not documentation — it is the control flow.
 ```
 stack.sh secrets setup [--phase 1..5] [--only ENV_NAME]
 
-  for each credential in the selected phase:
-    show set / missing / invalid without showing the value
-    if externally issued or provisioned:
-      show its source or provider console
-      offer keep / hidden entry / clear / skip
-      validate before an entered value is persisted
+  show a numbered menu of credential groups
+  keep AWS authentication optional and separate from workload phases
+  select a group, then a credential to enter, replace, or clear
+  return to the group after each action; b returns to the main menu
+  omit phases that have no external credentials
+  press q or Enter to finish
+  validate before an entered value is persisted
 
-  locally generated and built-in default values are shown in status,
-  but are not prompted by this command
+  generated values and non-secret config such as URLs, hosts, and regions
+  are omitted from this wizard
 ```
 
 The same primitives are also available independently: `secrets init` creates
-the private inventory, `secrets generate --phase N` is the explicitly separate
-helper for local values, `secrets set NAME` accepts one hidden external value,
-and `secrets status` / `secrets validate` are safe to use while screen-sharing.
+and synchronizes the private inventory, `secrets generate --phase N` explicitly
+fills or regenerates local values, `secrets set NAME` accepts one hidden
+external value, and `secrets status` / `secrets validate` are safe to use while
+screen-sharing. Unlike the external-only wizard, `secrets status` shows the
+complete inventory.
 
-Langfuse project keys remain a two-pass item until its headless initialization
-variables are wired into the Phase 1 Compose file. Scraping the UI is
-deliberately not part of the wizard.
+Langfuse project keys are now included in the automatically generated demo
+defaults and wired into the Phase 1 Compose headless initialization.
 
 ### A validation ladder, cheapest first
 
@@ -238,6 +258,7 @@ Each entry records more than a value — where to get it, what scopes it needs, 
   phase: 2
   env: CLICKHOUSE_CLOUD_USER
   value: ""
+  input: config
   console: https://clickhouse.cloud → service → Settings → Users
   scopes: [SELECT]
   notes: >-
@@ -253,7 +274,8 @@ Each entry records more than a value — where to get it, what scopes it needs, 
 | `value` | The secret itself. Empty in the committed template |
 | `console` | Where to obtain or rotate it |
 | `generate` | Allowlisted generator ID, such as `hex-16`; never a shell command |
-| `input` | Optional setup behavior override; `default` skips built-in defaults |
+| `input` | Classification override: `default` or `config` excludes non-external-secret values from setup |
+| `required` | Set to `false` for values such as the Enterprise license that may be skipped |
 | `scopes` | Least-privilege grants this credential should have |
 | `phase` | Which build-out phase needs it |
 | `owner` / `rotates` | Accountability and cadence for audits |
@@ -328,7 +350,7 @@ Run it before committing anything under `secrets/`.
 !!! warning "Never open the security group to `0.0.0.0/0`"
     The demo ports are unauthenticated by default and the stack holds live provider keys. Set `allowed_cidr` to your own IP as `<ip>/32`.
 
-**Prefer AWS IAM Identity Center** (`AWS_PROFILE` via `aws configure sso`) over static access keys. If SSO is available, leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` blank — Terraform picks up the profile.
+**Prefer AWS IAM Identity Center** (`AWS_PROFILE` via `aws configure sso`) over static access keys. If SSO is available, leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` blank — Terraform uses the standard AWS credential chain. Static keys remain supported as an alternative for environments where SSO is unavailable, but both halves of the pair must be configured together.
 
 **Scope tool credentials tightly.** From Phase 2 an agent can call tools, and it holds whatever grants the credential has. A read-only ClickHouse Cloud user is the difference between an agent that can answer questions and one that can `DROP TABLE`.
 

@@ -17,8 +17,8 @@ Two targets, one config. The target is a **flag**, not a fork in the config tree
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup              # external keys
-./scripts/stack.sh secrets generate --phase 1 # local values
+./scripts/stack.sh secrets setup              # external keys only
+./scripts/stack.sh secrets generate --phase 1 # internal demo values
 ./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh secrets write
 ./scripts/stack.sh doctor

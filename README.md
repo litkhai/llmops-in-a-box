@@ -270,7 +270,8 @@ Each entry records more than the value — the console URL to get it, the scopes
 ```
 
 ```bash
-./scripts/stack.sh secrets setup           # select a phase; enter external keys
+./scripts/stack.sh secrets setup           # external keys only
+./scripts/stack.sh secrets generate --phase 1  # internal demo values
 ./scripts/stack.sh secrets status --all    # no values printed
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # credentials.yaml -> .env
@@ -314,8 +315,8 @@ If a credential does leak, **revoke at the provider first** — rewriting histor
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup          # choose a phase; enter external keys
-./scripts/stack.sh secrets generate --phase 1  # optional local values
+./scripts/stack.sh secrets setup          # external keys, grouped by phase
+./scripts/stack.sh secrets generate --phase 1  # internal demo values
 ./scripts/stack.sh secrets write          # generate .env (mode 600)
 ./scripts/stack.sh doctor
 ```
@@ -340,11 +341,10 @@ See [Credentials](#credentials) for the full inventory and how it stays out of g
 
 > ⚠️ **`up` exits 1 today** — `docker/docker-compose.yml` has not been written, and writing it *is* Phase 1. See [Pre-Phase-1 confirmation](https://litkhai.github.io/llmops-in-a-box/phases/#pre-phase-1-confirmation).
 
-First-time setup — prefer [Langfuse headless initialization](https://langfuse.com/self-hosting/administration/headless-initialization), which lets you choose the key pair up front via `LANGFUSE_INIT_*` so the stack comes up correctly in one pass. Otherwise, the manual route:
-
-1. Open Langfuse → create org/project → copy the public & secret keys into **`secrets/credentials.yaml`**, then `./scripts/stack.sh secrets write`
-2. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys
-3. Verify: `./scripts/stack.sh status`
+On first setup, the wizard generates Langfuse's project key pair and the
+Compose stack passes it through `LANGFUSE_INIT_*`. Langfuse creates the demo
+organization and project on first boot, so no UI copy-and-restart cycle is
+required. Verify the result with `./scripts/stack.sh status`.
 
 Never paste secrets into `.env` directly — it is generated from `secrets/credentials.yaml` and overwritten on every `secrets write`.
 
