@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse defaults `max_server_memory_usage` to ~90% of what it can see. On
+  Docker Desktop that is the whole VM, so on a laptop running eight other
+  containers it will happily plan for memory the rest of the stack needs.
+
+  This caps it at 2 GiB, which is far more than a demo's trace volume requires.
+  The container also carries a `mem_limit` above this number, so ClickHouse
+  refuses a query gracefully at its own limit rather than being OOM-killed at
+  the cgroup limit.
+
+  Not tuning for throughput here. This is a laptop reference deployment; the
+  production answer is ClickHouse Cloud, which deployment.md already says.
+-->
+<clickhouse>
+    <max_server_memory_usage>2147483648</max_server_memory_usage>
+    <mark_cache_size>268435456</mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+
+    <!-- One background pool is plenty at this volume, and each thread costs. -->
+    <background_pool_size>4</background_pool_size>
+    <background_schedule_pool_size>4</background_schedule_pool_size>
+
+    <!-- Keep the logs from growing without bound on a long-lived laptop stack. -->
+    <logger>
+        <level>warning</level>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+</clickhouse>
