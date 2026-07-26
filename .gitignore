@@ -49,6 +49,9 @@ override.tf.json
 terraform.rc
 .terraform.lock.hcl
 
+# ─── Docs site build output (mkdocs build) ───────────────────────────────────
+site/
+
 # ─── Python (scripts/) ───────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

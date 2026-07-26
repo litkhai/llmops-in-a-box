@@ -1,0 +1,8 @@
+# Documentation site — https://litkhai.github.io/llmops-in-a-box/
+#
+#   pip install -r requirements-docs.txt
+#   mkdocs serve          # live preview on :8000
+#   mkdocs build --strict # what CI runs
+#
+# Pinned so a Material release cannot break the Pages deploy unnoticed.
+mkdocs-material==9.5.44

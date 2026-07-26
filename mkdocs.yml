@@ -1,0 +1,103 @@
+site_name: LLMOPS In a Box
+site_description: >-
+  Sovereign AI Stack — a composable, self-hosted enterprise AI stack: model
+  serving, unified gateway, chat UI, and full-stack observability.
+site_url: https://litkhai.github.io/llmops-in-a-box/
+site_author: Kee Hoon Lee
+
+repo_url: https://github.com/litkhai/llmops-in-a-box
+repo_name: litkhai/llmops-in-a-box
+edit_uri: edit/main/docs/
+
+copyright: MIT licensed. Built on open infrastructure.
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+nav:
+  - Overview: index.md
+  - Build-out phases: phases.md
+  - Configuration: configuration.md
+  - Deployment: deployment.md
+  - Credentials: credentials.md
+  - Demo flow: demo-flow.md
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.smartsymbols
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.keys
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/litkhai/llmops-in-a-box
+      name: Source on GitHub
+
+# Fail the build on a broken internal link rather than shipping it.
+strict: true

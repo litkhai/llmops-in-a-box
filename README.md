@@ -5,6 +5,8 @@
 >
 > Stack components may include: LiteLLM · LibreChat · Langfuse · vLLM · OpenAI · Anthropic · RunPod · AWS · MinIO
 
+📖 **[Documentation site →](https://litkhai.github.io/llmops-in-a-box/)**
+
 ---
 
 ## Why this exists
@@ -204,8 +206,16 @@ Layer dependencies resolve transitively — asking for a layer brings up what it
 │   └── librechat.yaml          # ⚙ RENDERED from stack.yaml
 ├── terraform/                  # Target 2 — AWS EC2                   (todo)
 ├── runpod/                     # Phase 3 — GPU serving layer          (todo)
-└── docs/
-    └── demo-flow.md            # 10-minute demo script               (todo)
+├── mkdocs.yml                  # ★ docs site (MkDocs Material)
+├── requirements-docs.txt
+├── .github/workflows/pages.yml # ★ builds + deploys the site
+└── docs/                       # ★ published to GitHub Pages
+    ├── index.md                # overview + architecture
+    ├── phases.md               # the 4-phase build-out
+    ├── configuration.md        # stack.yaml + stack.sh
+    ├── deployment.md           # targets, prerequisites, troubleshooting
+    ├── credentials.md          # secret handling and ignore coverage
+    └── demo-flow.md            # 10-minute demo script
 ```
 
 ★ implemented · ⚙ generated, do not hand-edit · (todo) not scaffolded yet
@@ -410,7 +420,7 @@ Model alternatives for Korean workloads are listed under `layers.serving.options
 
 From Phase 3, open with the RunPod pod running vLLM: *your model, your infra, live in minutes.*
 
-Full script with talking points: [`docs/demo-flow.md`](docs/demo-flow.md) *(todo)*.
+Full script with talking points: **[docs/demo-flow.md](https://litkhai.github.io/llmops-in-a-box/demo-flow/)**.
 
 ---
 
@@ -442,7 +452,7 @@ Full script with talking points: [`docs/demo-flow.md`](docs/demo-flow.md) *(todo
 
 Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phases`.
 
-- [ ] **Phase 1** — `docker-compose.yml`, `demo.py`, `seed_traces.py`, `docs/demo-flow.md`
+- [ ] **Phase 1** — `docker-compose.yml`, `demo.py`, `seed_traces.py`
 - [ ] **Phase 2** — MCP tool layer; ClickHouse Cloud server first, traced through the same pipeline
 - [ ] **Phase 3** — RunPod vLLM serving; `runpod/deploy_vllm.md`, `terraform/`
 - [ ] **Phase 4** — MinIO artifact storage, MemKV semantic cache
