@@ -73,7 +73,7 @@ The stack is built **frontier-first**: get the gateway, tracing, and UI working 
 
 > **On KV-cache offload, and MemKV specifically.** The capability — prefill a long shared prefix once and reuse it instead of recomputing it per request — splits into two tracks.
 >
-> **Buildable now:** vLLM's prefix caching, then [LMCache](https://github.com/lmcache/lmcache) to move that cache off the GPU to CPU, disk or **S3-compatible storage** — which is to say, the Phase 4 AIStor instance. One pod, one flag, no vendor conversation.
+> **Buildable now (Phase 4a):** vLLM's prefix caching, then [LMCache](https://github.com/lmcache/lmcache) to move that cache off the GPU to CPU, disk or **S3-compatible storage** — which is to say, the Phase 4 AIStor instance. Runs on the existing Phase 3 pod.
 >
 > **Partnership track:** [MinIO MemKV](https://www.min.io/product/memkv) does the same thing at fleet scale over RDMA, and needs NVIDIA STX systems, Vera CPUs, Spectrum-X 800 GbE and PCIe Gen6. It has no GA, no trial and no download — only *"Talk to a Specialist"* and *"Get Pricing"* — so the next step there is **opening a partnership discussion with MinIO**, not an install. Note it is a separate product from AIStor: the free-at-one-node tier does **not** extend to it. See [Build-out phases](docs/phases.md).
 

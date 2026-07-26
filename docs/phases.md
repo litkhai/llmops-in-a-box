@@ -299,7 +299,7 @@ The line to watch is *nodes*, not terabytes: the moment the deployment goes mult
 
 ### Phase 4a — KV-cache reuse
 
-:material-timer-sand: **Planned — buildable, no vendor conversation needed**
+:material-timer-sand: **Planned**
 
 The second half of Phase 4, and the reason it is "large context" and not just "storage". A long shared prefix — a system prompt, a policy document, a codebase — is prefilled **once** and reused, instead of recomputed on every request. LMCache's published figure for a 128K-token prompt on an H100 is TTFT around 11s cold against roughly 1.5s on a cache hit.
 
@@ -341,37 +341,33 @@ options:
 
 ### Phase 4b — KV-cache offload at fleet scale
 
-:material-handshake-outline: **Needs a partnership conversation with MinIO — not self-serve**
+:material-handshake-outline: **Partnership track with MinIO**
 
-`stack.yaml` carries a `memory` layer with `impl: memkv`. Reading [MinIO's MemKV page](https://www.min.io/product/memkv) against what the config actually declares turns up a mismatch worth recording rather than quietly shipping.
+Where [4a](#phase-4a-kv-cache-reuse) ends and a GPU fleet begins. `stack.yaml` carries a `memory` layer with `impl: memkv` for this.
 
-**What MemKV is.** A "purpose-built context memory store for AI inference" — a petascale, flash-backed pool for the transformer **KV cache**. It moves attention key/value blocks from GPU memory to NVMe over RDMA, bypassing file system and object protocols entirely, in 2–16 MB blocks. The target metrics are TTFT and TPOT; MinIO claims 95%+ sustained GPU utilisation and 40–60% lower cost per token.
+**What MemKV is.** A "purpose-built context memory store for AI inference" — a petascale, flash-backed pool for the transformer **KV cache**. It moves attention key/value blocks from GPU memory to NVMe over RDMA, bypassing file system and object protocols, in 2–16 MB blocks. The stated target metrics are TTFT and TPOT, with MinIO citing 95%+ sustained GPU utilisation and 40–60% lower cost per token.
 
-**What it needs.** It runs as a single binary on NVIDIA STX-based systems, accelerated by NVIDIA Vera CPUs, built for Spectrum-X 800 GbE networking and PCIe Gen6.
+**What it needs.** A single binary on NVIDIA STX-based systems, accelerated by NVIDIA Vera CPUs, built for Spectrum-X 800 GbE networking and PCIe Gen6. That is fleet-scale infrastructure, not a laptop container or a single pod.
 
-That is not something a `docker compose up` on a laptop, or a single RunPod pod, can host. It is a GPU-fleet-scale component, and no amount of config makes it a Phase 4 container.
+**Current availability.** The [product page](https://www.min.io/product/memkv) states no general availability and offers no download, trial or developer edition; the calls to action are *"Talk to a Specialist"* and *"Get Pricing"*. No ship date is given, for MemKV or for the NVIDIA hardware it targets.
 
-**And it cannot be self-served.** The product page carries no general-availability statement, no download, no trial, no free or developer edition — the only two calls to action are *"Talk to a Specialist"* and *"Get Pricing"*. It gives no ship date, and neither does it cite one for the NVIDIA hardware it depends on.
+**So the next step is a conversation with MinIO,** covering: whether an early-access or design-partner programme exists, what hardware would be required in front of it, how licensing works, and whether anything can be demonstrated ahead of STX availability.
 
-**Which makes the next step a partnership discussion, not an install.** There is no path where someone on this project downloads MemKV and tries it over an afternoon. Getting to an evaluation means going to MinIO directly and asking: is there an early-access or design-partner programme, what hardware would we actually need in front of it, what does the licensing look like, and is there anything that can be demonstrated before NVIDIA STX systems are obtainable.
+Two things to keep straight while having it:
 
-Worth being precise about the framing. This is **not** blocked on a purchase order — you cannot buy your way in this quarter — and it is **not** covered by the AIStor Free tier that makes [Phase 4](#phase-4-storage-and-large-context) free. It is a commercial relationship to open, and that is a different kind of task with a different owner.
+- It is a **separate product from AIStor**. The single-node free tier that covers [Phase 4](#phase-4-storage-and-large-context)'s object store does not extend here.
+- It is **not a semantic cache**, though `stack.yaml`'s `memory` layer currently declares `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. Those settings describe a third mechanism again:
 
-**And it is not a semantic cache.** `stack.yaml` currently declares `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. Those settings describe a different mechanism:
+| | Semantic cache | KV-cache reuse (4a) | KV-cache offload (MemKV) |
+|---|---|---|---|
+| Keyed on | prompt embedding | shared token prefix | shared token prefix |
+| Stores | the finished response | attention K/V blocks | attention K/V blocks |
+| Hit means | skip inference entirely | skip prefill recomputation | skip prefill recomputation |
+| Cache lives | in front of the gateway | pod RAM, NVMe or S3 | NVMe over RDMA, petascale |
+| Correctness risk | can serve a near-miss as exact | none — identical math | none — identical math |
+| Available here | LiteLLM supports it natively | yes, Phase 4a | needs STX-class hardware |
 
-| | Semantic cache | KV-cache offload (MemKV) |
-|---|---|---|
-| Keyed on | prompt embedding | shared token prefix |
-| Stores | the finished response | attention K/V blocks |
-| Hit means | skip inference entirely | skip prefill recomputation |
-| Sits | in front of the gateway | under the inference engine |
-| Correctness risk | can serve a near-miss answer as if exact | none — identical math |
-| Fits this stack | yes, LiteLLM supports it natively | no, needs STX-class hardware |
-
-!!! note "What is still not scheduled"
-    A **semantic cache** — embed the prompt, return a stored response above a similarity threshold — is a different mechanism from both the `kvcache` layer and MemKV, and is not part of either. LiteLLM supports it natively with a Redis backend if it is ever wanted, but it trades correctness for latency in a way KV-cache reuse does not, so it should be decided on its own terms.
-
-    `stack.yaml`'s `memory` layer still carries `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. That mismatch is annotated in place rather than rewritten, because resolving it means choosing which of the three mechanisms the layer was supposed to be.
+A semantic cache is not scheduled. It trades correctness for latency in a way neither KV-cache mechanism does, so it belongs on its own decision rather than folded in here. The mismatch in `stack.yaml` is annotated in place rather than rewritten, because resolving it means choosing which of the three columns above the `memory` layer is meant to be.
 
 ---
 
@@ -447,7 +443,7 @@ guardrails:
     litellm_params: { guardrail: moderation, mode: post_call }
 ```
 
-**`mode` is the whole thing.** A PII filter running `post_call` has already sent the PII to OpenAI. Redaction that happens after egress is theatre — and on this stack it is a real risk, because [Phase 1](#phase-1-frontier-models) sends every request to a commercial API.
+**`mode` is the whole thing.** A PII filter running `post_call` has already sent the PII to OpenAI — redaction after egress protects nothing. On this stack that is a live risk rather than a hypothetical, because [Phase 1](#phase-1-frontier-models) sends every request to a commercial API.
 
 #### What to guard, and why here
 
