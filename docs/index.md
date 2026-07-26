@@ -140,6 +140,15 @@ $EDITOR secrets/credentials.yaml     # paste those + your provider keys
 ./scripts/stack.sh up                # Phase 1 — no GPU needed
 ```
 
+!!! warning "The last line does not work yet"
+    `up` currently exits 1 — `docker/docker-compose.yml` has not been written, and Phase 1 is the work of writing it:
+
+    ```console
+    error: compose file not found: docker/docker-compose.yml — not scaffolded yet (Phase 1)
+    ```
+
+    Everything above that line works today: the config model, the credential inventory, the renderers and `doctor`. See [Pre-Phase-1 confirmation](phases.md#pre-phase-1-confirmation) for exactly what is and is not verified.
+
 Continue with [Deployment](deployment.md), or read [Configuration](configuration.md) for how `stack.yaml` and `stack.sh` fit together.
 
 For the reasoning underneath all of it — why a gateway is the load-bearing decision, what was considered at each layer and rejected, why ClickHouse sits under Langfuse, what 망분리 and ISMS-P actually require, and a glossary of the terms these docs assume — see [Background](background.md).

@@ -53,6 +53,9 @@ Everything except GPU serving runs locally in one compose stack.
 ./scripts/stack.sh up --target docker --profile phase-1
 ```
 
+!!! warning "Not yet — `docker/docker-compose.yml` is unwritten"
+    This command exits 1 today. Writing that compose file *is* Phase 1. The transcripts below show the intended output once it exists; see [Pre-Phase-1 confirmation](phases.md#pre-phase-1-confirmation) for what is verified now.
+
 | Service | URL | Notes |
 |---|---|---|
 | LibreChat | <http://localhost:3080> | Chat UI, model picker |
@@ -82,6 +85,12 @@ $ ./scripts/stack.sh status
   ✓ langfuse     200  http://localhost:3000/api/public/health
   ✓ librechat    200  http://localhost:3080/health
   ✓ clickhouse   200  http://localhost:8123/ping
+```
+
+With nothing running — which is the state today — the same command returns `✗ 000` for every row. That is `curl` failing to connect, not a health check reporting unhealthy.
+
+```bash
+./scripts/stack.sh urls        # just print the endpoints, no requests
 ```
 
 Open Langfuse — you should see traces for `gpt-4o` and `claude-sonnet` in one project.

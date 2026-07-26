@@ -185,12 +185,13 @@ One declarative file describes **what** the stack is. A script decides **where**
 ./scripts/stack.sh models                       # model table with per-1k costs
 ./scripts/stack.sh render                       # regenerate litellm_config.yaml + librechat.yaml
 ./scripts/stack.sh up      --target docker      # render, then deploy
+./scripts/stack.sh urls                         # print every endpoint, no requests
 ./scripts/stack.sh status                       # curl every health check for active layers
 ./scripts/stack.sh logs                         # follow compose logs
 ./scripts/stack.sh down    [--purge]            # tear down (--purge also drops volumes)
 ```
 
-Flags: `--target` · `--profile` · `--tf-var k=v` · `--all` · `--no-render` · `--dry-run` · `--file`
+Flags: `--target`/`-t` · `--profile`/`-p` · `--file`/`-f` · `--tf-var k=v` · `--all` · `--no-render` · `--purge` · `--dry-run`/`-n` · `--help`/`-h`
 
 ### Profiles
 
@@ -346,11 +347,15 @@ See [Credentials](#credentials) for the full inventory and how it stays out of g
 | ClickHouse | localhost:8123 | Langfuse trace store |
 | MinIO | http://localhost:9001 | blob store backing Langfuse |
 
-First-time setup:
+> ⚠️ **`up` exits 1 today** — `docker/docker-compose.yml` has not been written, and writing it *is* Phase 1. See [Pre-Phase-1 confirmation](https://litkhai.github.io/llmops-in-a-box/phases/#pre-phase-1-confirmation).
 
-1. Open Langfuse → create org/project → copy the public & secret keys into `.env`
+First-time setup — prefer [Langfuse headless initialization](https://langfuse.com/self-hosting/administration/headless-initialization), which lets you choose the key pair up front via `LANGFUSE_INIT_*` so the stack comes up correctly in one pass. Otherwise, the manual route:
+
+1. Open Langfuse → create org/project → copy the public & secret keys into **`secrets/credentials.yaml`**, then `./scripts/stack.sh secrets write`
 2. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys
 3. Verify: `./scripts/stack.sh status`
+
+Never paste secrets into `.env` directly — it is generated from `secrets/credentials.yaml` and overwritten on every `secrets write`.
 
 Open Langfuse — you should see traces for `gpt-4o` and `claude-sonnet` in one project.
 

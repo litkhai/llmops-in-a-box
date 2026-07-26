@@ -136,10 +136,16 @@ profiles:
 
   # ── Convenience aliases, independent of phase ──
 
-  # Everything currently implemented, whatever phase that is.
+  # Everything currently implemented, whatever phase that is. `tools` and
+  # `storage` are listed because they are intended and simply not built yet —
+  # the resolver skips them with a warning while `enabled: false`.
+  #
+  # `memory` is deliberately NOT listed. It is not "not built yet", it is not
+  # part of this stack at all: MemKV needs NVIDIA STX-class hardware. Leaving
+  # it here contradicted the docs, which say it belongs to no phase or profile.
   full:
     description: Every layer whose `enabled` is true
-    layers: [gateway, observability, ui, tools, serving, storage, memory]
+    layers: [gateway, observability, ui, tools, serving, storage]
 
   # Gateway + traces, no chat UI. For SDK / script-driven demos.
   headless:

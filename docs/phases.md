@@ -10,6 +10,61 @@ Each phase is a **one-flag change**, not a config rewrite.
 
 ---
 
+## Pre-Phase-1 confirmation
+
+Phase 1 has not started. This is the verified state of the repository before it does — checked by running the things, not by reading them.
+
+### Confirmed working
+
+| Check | Evidence |
+|---|---|
+| `stack.yaml` parses, schema 1 | `doctor` reports it |
+| `phases`, `config`, `models`, `render`, `secrets`, `urls` | all run; `config --profile phase-N` resolves for every phase |
+| Layer dependencies resolve transitively | a profile naming a disabled layer warns and skips rather than failing |
+| Every command named in these docs exists | cross-checked against the script's dispatch — no documented command is missing |
+| Every flag named in these docs exists | `--target` `--profile` `--file` `--tf-var` `--all` `--no-render` `--purge` `--dry-run`, plus short forms `-t -p -f -n -h` |
+| Internal doc links and anchors | zero broken across all pages |
+| Ports in these docs match `stack.yaml` | all of them |
+| `secrets audit` | passes — nothing sensitive tracked, in the index, or in history |
+
+### Confirmed missing
+
+| Gap | Consequence |
+|---|---|
+| **`docker/docker-compose.yml` does not exist** | `stack.sh up` exits 1. Never committed; there is no generator for it, so it is hand-written work |
+| `secrets/credentials.yaml` is the blank template | `doctor` exits 1 on `LITELLM_MASTER_KEY`. Fixed by `secrets gen` |
+| `terraform/` is not scaffolded | `--target aws-ec2` exits 1 with a clear message |
+
+!!! info "`up` fails cleanly, and that was designed"
+    ```console
+    $ ./scripts/stack.sh up --dry-run
+    error: compose file not found: docker/docker-compose.yml — not scaffolded yet (Phase 1)
+    ```
+
+    The check runs **before** the renderer, so a failed `up` leaves no half-written config behind — verified by a clean `git status docker/` afterwards.
+
+    It also runs in the parent shell rather than inside `compose_args`, and the script says why: a `die` inside a command substitution would only exit the subshell, and `docker compose` would then run with no `-f` and pick up whatever compose file happened to be in the working directory. Worth knowing, because that failure would have been silent and wrong rather than loud and correct.
+
+### What starting Phase 1 actually requires
+
+1. Write `docker/docker-compose.yml` — seven services across the `gateway`, `obs` and `ui` compose profiles
+2. `./scripts/stack.sh secrets gen` and fill in two provider keys
+3. `./scripts/stack.sh doctor` green, then `up`, then `status`
+
+Nothing else in the repository is in the way.
+
+### Re-running this check
+
+```bash
+./scripts/stack.sh doctor --all         # tooling, secrets, layers, models
+./scripts/stack.sh secrets audit        # leak and ignore-coverage check
+./scripts/stack.sh config --profile phase-1
+./scripts/stack.sh up --dry-run         # expected to fail until compose exists
+mkdocs build --strict                   # docs, links and anchors
+```
+
+---
+
 ## Why this order
 
 !!! quote "Phase 1 proves the architecture with zero infrastructure risk"

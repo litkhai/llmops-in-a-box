@@ -136,7 +136,11 @@ So the classification is not documentation — it is the control flow.
 
 ### The proposed flow
 
+!!! danger "`secrets init` does not exist — this is a design sketch"
+    The implemented subcommands are `secrets write`, `secrets gen` and `secrets audit`. Everything in this section is a proposal; the flags below are not accepted by anything today.
+
 ```
+# NOT IMPLEMENTED — proposed interface
 stack.sh secrets init [--phase N] [--only NAME] [--force] [--from-env]
 
   for each credential the selected phase needs:
