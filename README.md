@@ -431,25 +431,31 @@ Full script with talking points: **[docs/demo-flow.md](https://litkhai.github.io
 
 ## What this demonstrates
 
+Each claim is tagged with the phase that makes it **showable**. Most are not showable yet — three of the four operational claims are about GPU economics, and Phase 1 has no GPU in it.
+
+> ⚠️ A `Phase 3` claim is an argument about the design, not something that can be put on screen today. Leading with GPU cost figures against a stack that is currently OpenAI and Anthropic only is what gets taken apart in the room.
+
 **Deployment & operations**
 
-- **Config-driven deployment** — one `stack.yaml` plus one script covers laptop and cloud; the deployment target is a flag, not a fork in the config tree.
-- **Ease of deployment** — vLLM template on RunPod is live in minutes vs. EC2 GPU setup (AMI, drivers, networking); the rest is one `stack.sh up`.
-- **Fast cold-start** — RunPod pods spin up in seconds (FlashBoot for serverless) vs. minutes-long cloud GPU provisioning.
-- **Cost efficiency** — per-second GPU billing with zero idle cost when stopped; typically 2–3× cheaper than on-demand cloud GPU pricing. LiteLLM cost tracking makes self-hosted vs. API economics directly comparable in Langfuse.
+- `Phase 1` **Config-driven deployment** — one `stack.yaml` plus one script covers laptop and cloud; the deployment target is a flag, not a fork in the config tree.
+- `Phase 1` **Cross-provider cost attribution** — LiteLLM reports per-model cost into Langfuse, so OpenAI and Anthropic spend sits on one axis. The half of the cost story that works with no GPU.
+- `Phase 3` **Ease of deployment** — vLLM template on RunPod is live in minutes vs. EC2 GPU setup (AMI, drivers, networking); the rest is one `stack.sh up`.
+- `Phase 3` **Fast cold-start** — RunPod pods spin up in seconds (FlashBoot for serverless) vs. minutes-long cloud GPU provisioning.
+- `Phase 3` **GPU cost efficiency** — per-second billing with zero idle cost when stopped; typically 2–3× cheaper than on-demand cloud GPU pricing. The *self-hosted vs. API* comparison needs a self-hosted model to compare against, so it arrives with this phase, not before.
 
 **Architecture**
 
-- **Unified gateway** — one OpenAI-compatible endpoint in front of self-hosted and commercial models; applications never change when models do.
-- **Framework-neutral observability** — tracing lives at the gateway, so raw SDKs, LangChain, LlamaIndex, and MCP-based agents are all captured identically with zero app-code changes.
-- **Composability** — every layer is swappable: vLLM → SGLang/TGI, RunPod → AWS/on-prem GPU, LibreChat → your own app, without touching the rest of the stack.
-- **Incremental adoption, proven** — the phase profiles are the argument: the same config carries you from APIs-only to fully self-hosted without a rewrite.
+- `Phase 1` **Unified gateway** — one OpenAI-compatible endpoint in front of self-hosted and commercial models; applications never change when models do.
+- `Phase 1` **Framework-neutral observability** — tracing lives at the gateway, so raw SDKs, LangChain and LlamaIndex are captured identically with zero app-code changes.
+- `Phase 2` **Traced tool calls** — the same applies to MCP-based agents: tool calls land in Langfuse beside the completion that triggered them.
+- `Phase 3` **Composability** — every layer is swappable: vLLM → SGLang/TGI, RunPod → AWS/on-prem GPU, LibreChat → your own app. Swapping the serving layer only becomes a demonstration once there is one.
+- `Phase 3` **Incremental adoption** — the phase profiles are the argument, and it completes when the same config has actually carried the stack from APIs-only to self-hosted without a rewrite.
 
 **Enterprise fit**
 
-- **Sovereignty & compliance** — the full path (UI → gateway → model → traces) can run inside your own network boundary; relevant to regulated and air-gapped environments (e.g. Korean 망분리 / ISMS-P contexts). `--profile airgapped` enforces no commercial API egress.
-- **Gradual adoption** — start with commercial APIs, add self-hosted models later behind the same gateway, with one observability pane throughout.
-- **Scale story** — Langfuse's ClickHouse backend handles production-scale trace volume; the same architecture extends from a laptop demo to millions of traces per day.
+- `Phase 1` **Scale story** — Langfuse's ClickHouse backend handles production-scale trace volume; the same architecture extends from a laptop demo to millions of traces per day.
+- `Phase 1` **Gradual adoption** — start with commercial APIs behind the gateway, with one observability pane from the first request.
+- `Phase 3` **Sovereignty & compliance** — the full path (UI → gateway → model → traces) inside your own network boundary; relevant to regulated and air-gapped environments (e.g. Korean 망분리 / ISMS-P contexts). `--profile airgapped` enforces no commercial API egress — but it needs a self-hosted model to route to, so **Phase 1 egresses every request to OpenAI or Anthropic**. Say so plainly rather than letting the architecture diagram imply otherwise.
 
 ---
 
