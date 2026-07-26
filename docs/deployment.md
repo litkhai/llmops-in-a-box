@@ -17,9 +17,8 @@ Two targets, one config. The target is a **flag**, not a fork in the config tree
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup              # optional d=default credentials; g generates, w writes
+./scripts/stack.sh secrets setup --phase 1    # inside: d, provider keys, g, w
 ./scripts/stack.sh secrets validate --phase 1
-./scripts/stack.sh secrets write
 ./scripts/stack.sh doctor
 ```
 
@@ -72,7 +71,9 @@ Everything except GPU serving runs locally in one compose stack.
 The manual route, if you are not using headless init:
 
 1. Open Langfuse → create an org and project → copy the public and secret keys.
-2. Paste them into `secrets/credentials.yaml`, then `./scripts/stack.sh secrets write`.
+2. Store them with `./scripts/stack.sh secrets set LANGFUSE_PUBLIC_KEY` and
+   `./scripts/stack.sh secrets set LANGFUSE_SECRET_KEY`, then run
+   `./scripts/stack.sh secrets write`.
 3. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys.
 4. Verify: `./scripts/stack.sh status`
 

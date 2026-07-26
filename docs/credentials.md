@@ -1,10 +1,12 @@
 # Credentials
 
-Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse Cloud, Langfuse, MinIO — is inventoried in **one** file.
+Every API key and local service login the stack touches — OpenAI, Anthropic,
+RunPod, AWS, ClickHouse Cloud, LiteLLM, Langfuse, MinIO, and their backing
+services — is inventoried in **one** file.
 
 ```mermaid
 flowchart LR
-    W["<b>secrets setup</b><br/><small>phase-aware · hidden input</small>"]
+    W["<b>secrets setup</b><br/><small>technology groups · typed input</small>"]
     C["<b>secrets/credentials.yaml</b><br/><small>private · mode 600</small>"]
     E["<b>.env</b><br/><small>generated · mode 600</small>"]
     D["docker compose"]
@@ -21,9 +23,11 @@ flowchart LR
     class E gen
 ```
 
-`secrets/credentials.yaml` is the private source of truth. The phase-aware setup
-command updates it with hidden input; `.env` is derived from it and **gets
-overwritten**. Neither command prints secret values.
+`secrets/credentials.yaml` is the private source of truth. The setup hub groups
+the complete inventory by technology, hides secret input, and keeps stored
+values masked by default. `.env` is derived from it and **gets overwritten**.
+Values are printed only when you explicitly choose `r` after a
+terminal-scrollback warning.
 
 ---
 
@@ -36,6 +40,19 @@ overwritten**. Neither command prints secret values.
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh doctor
 ```
+
+For a first run, use the setup menu in this order:
+
+1. `d` — optionally set a default ID, email, and password. Each technology
+   receives the login field it supports.
+2. Open **Model providers** and enter the external API keys you intend to use.
+3. `g` — generate every missing internal key, salt, and encryption value.
+4. `w` — validate everything and atomically write `.env`.
+5. `q` — finish. Re-run the menu at any time; existing values are preserved
+   unless you explicitly replace, delete, or regenerate them.
+
+Configured items offer `c` to copy, `r` to reveal after confirmation, `e` to
+replace, and `d` to delete. Generated items also offer `g` to regenerate.
 
 You can also operate on one phase or one key:
 
@@ -56,17 +73,24 @@ explicitly rather than treated as an error.
 
 ## Where each credential comes from
 
-Twenty-odd credentials sounds worse than it is, because **you only have to go and fetch about a third of them**. Sorting them by *where a value comes from* is the thing that makes this tractable — and it is also what the automation below is built on.
+The inventory contains more than forty values across all five phases, but only
+a minority come from an external provider. Sorting them by *where a value
+comes from* is what makes this tractable — and it is also what the automation
+below is built on.
 
 Each entry's `console:` field in `secrets/credentials.yaml` is the authoritative pointer; this is the map.
 
 ### Kind 1 — self-generated (no browser, no account)
 
-These are passwords for services this stack runs itself. Nobody issues them to you; you invent them, and `secrets generate` creates and stores stronger values without printing them.
+These are keys and passwords for services this stack runs itself. Nobody
+issues them to you; `secrets generate` creates and stores strong values without
+printing them.
 
-`LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `LANGFUSE_PUBLIC_KEY` ·
+`LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `UI_PASSWORD` ·
+`LANGFUSE_PUBLIC_KEY` ·
 `LANGFUSE_SECRET_KEY` · `NEXTAUTH_SECRET` · `LANGFUSE_SALT` ·
-`LANGFUSE_ENCRYPTION_KEY` · `REDIS_AUTH` · `CLICKHOUSE_PASSWORD` ·
+`LANGFUSE_ENCRYPTION_KEY` · `LANGFUSE_INIT_USER_PASSWORD` ·
+`REDIS_AUTH` · `CLICKHOUSE_PASSWORD` ·
 `POSTGRES_PASSWORD` · `MINIO_ROOT_PASSWORD` ·
 `LIBRECHAT_CREDS_KEY` · `LIBRECHAT_CREDS_IV` · `LIBRECHAT_JWT_SECRET` ·
 `LIBRECHAT_JWT_REFRESH_SECRET` · `ARTIFACT_MINIO_ROOT_USER` ·
@@ -128,9 +152,9 @@ wizard generates the project key pair as internal demo defaults.
 | `VLLM_API_BASE` | the RunPod pod's HTTP proxy URL | **must end in `/v1`** — `https://<pod-id>-8000.proxy.runpod.net/v1` |
 | `MCP_CLICKHOUSE_URL` | wherever the MCP server is reachable | Phase 2 |
 
-### What this means for a first run
+### Setup menu reference
 
-Start with the unified setup hub. It shows the complete inventory in technology
+The unified setup hub shows the complete inventory in technology
 groups: model providers, LiteLLM, Langfuse, Redis, ClickHouse, PostgreSQL,
 MinIO, LibreChat, the MCP layer, self-hosted serving, AWS, and artifact storage.
 Selecting a group shows each value's input type and state.
@@ -164,7 +188,7 @@ Langfuse's optional display name remains independently editable. The shortcut
 does not reuse the password for API keys, LiteLLM gateway keys, JWT/signing
 secrets, encryption keys, or externally issued credentials.
 
-Use the shortcut before the first stack startup. Once a persistent database or
+Use default credentials before the first stack startup. Once a persistent database or
 object-store volume exists, changing only `.env` does not rotate the account
 inside that service; coordinate an in-service rotation or recreate disposable
 demo volumes. A shared password is convenient for a local demo but expands the
@@ -235,7 +259,8 @@ That inverts the usual instinct. Most credential validation asks *does this work
 
 A wizard that collects secrets is a new place for secrets to leak. Non-negotiables:
 
-- `read -rs` — never echo to the terminal, never leave it in a scrollback someone screen-shares
+- `read -rs` — secret input is never echoed; an explicit `r` reveal is the only
+  path that prints a stored value and it warns that terminal scrollback will retain it
 - **never pass a secret as an argument** — argv is world-readable via `ps`; use stdin or the environment
 - `set +x` around the block, so running the script with tracing on does not print every value
 - `umask 077` before writing, and write to a temp file in the same directory then `mv` — atomic, with no window where a half-written file has loose permissions
@@ -244,7 +269,9 @@ A wizard that collects secrets is a new place for secrets to leak. Non-negotiabl
 ### Idempotency, because setup gets interrupted
 
 - `secrets generate` preserves an existing value unless `--force` is explicit
-- the interactive wizard defaults to keeping a set value and never overwrites silently
+- the interactive wizard defaults to keeping a set value; replacing one
+  requires an item action, while Set default credentials shows target counts
+  and requires confirmation before its mapped fields are overwritten
 - a run that dies halfway leaves earlier answers intact and can be resumed
 - nothing is overwritten silently — that is how a working key gets replaced by a typo
 
@@ -265,7 +292,9 @@ Building the wizard to assume a file is how "just for the demo" quietly becomes 
 
 - **Creating accounts and adding payment methods.** That is a purchasing decision with a human owner, and scripting it buys nothing.
 - **Rotating provider keys from the same script that stores them.** Rotation should be initiated where revocation happens — at the provider.
-- **Scraping the Langfuse UI for its keys.** Brittle against every release. The two-pass prompt is honest and stable.
+- **Scraping the Langfuse UI for its keys.** Brittle against every release.
+  Headless initialization is the recommended single-pass path; a manually
+  created key pair can still be entered through `secrets set`.
 
 ---
 
@@ -294,7 +323,8 @@ Each entry records more than a value — where to get it, what scopes it needs, 
 | `value` | The secret itself. Empty in the committed template |
 | `console` | Where to obtain or rotate it |
 | `generate` | Allowlisted generator ID, such as `hex-16`; never a shell command |
-| `input` | Classification override: `default` or `config` excludes non-external-secret values from setup |
+| `input` | Input behavior: hidden external value, visible `config`, or visible committed `default` |
+| `default_credential` | Optional semantic mapping: `id`, `email`, or `password` for Set default credentials |
 | `required` | Set to `false` for values such as the Enterprise license that may be skipped |
 | `scopes` | Least-privilege grants this credential should have |
 | `phase` | Which build-out phase needs it |

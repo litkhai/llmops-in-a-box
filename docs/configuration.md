@@ -119,7 +119,9 @@ Resolves the config for a chosen `--target` and `--profile`, then renders the mo
 | Command | Purpose |
 |---|---|
 | `doctor` | Preflight: tooling, secrets, layers, models |
-| `secrets write \| gen \| audit` | Credential inventory → `.env`, leak check |
+| `secrets setup` | Technology-grouped credential menu: input, defaults, generation, `.env` write |
+| `secrets status \| validate` | Report presence and check formats without printing values |
+| `secrets write \| generate \| audit` | Automation primitives and leak checks |
 | `phases` | Build-out phases and current status |
 | `config` | Resolved stack for the selected target/profile |
 | `models` | Model table with per-1k costs |

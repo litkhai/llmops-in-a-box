@@ -37,7 +37,7 @@ LANGFUSE_PORT=3100 LITELLM_PORT=4001 ./scripts/stack.sh up
 ```
 
 !!! note "Only six ports are published, deliberately"
-    Postgres, Redis, ClickHouse's native protocol and the Langfuse worker are reachable inside the compose network and **not** exposed to the host. They are the ports most likely to already be in use on a developer machine, and nothing outside the stack needs them. `docker compose -p sais exec postgres psql -U postgres` when you want a shell.
+    Postgres, Redis, ClickHouse's native protocol and the Langfuse worker are reachable inside the compose network and **not** exposed to the host. They are the ports most likely to already be in use on a developer machine, and nothing outside the stack needs them. Run `docker compose -p sais exec postgres sh -c 'psql -U "$POSTGRES_USER"'` when you want a shell.
 
 ---
 
@@ -47,22 +47,37 @@ LANGFUSE_PORT=3100 LITELLM_PORT=4001 ./scripts/stack.sh up
 brew install yq            # mikefarah v4 — the script refuses other builds
 
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets generate --phase 1
+./scripts/stack.sh secrets setup --phase 1
 ```
 
-`generate` creates and stores the fifteen values nobody issues you — database passwords, signing salts, the LiteLLM master key, the Langfuse key pair. **It prints none of them.** They land in `secrets/credentials.yaml` at mode 600, which is gitignored.
+The setup hub shows Phase 1 credentials grouped by technology. Work through it
+in this order:
 
-Now the one or two you have to fetch yourself:
+1. Press `d` for **Set default credentials**. It asks for a default ID, email,
+   and password, then maps each to the technologies that use that login shape:
+   LiteLLM receives the ID and Langfuse receives the email.
+2. Open **Model providers** and enter at least one of `OPENAI_API_KEY` or
+   `ANTHROPIC_API_KEY`. External values use hidden input and are validated
+   before storage.
+3. Press `g` to generate every remaining internal key, salt, and encryption
+   value. Existing values are preserved.
+4. Press `w` to validate the inventory and atomically write `.env` with mode
+   `600`, then `q` to finish.
+
+All values land in the gitignored `secrets/credentials.yaml` at mode `600`.
+They stay hidden unless you explicitly select a configured item and choose `c`
+to copy it or `r` to reveal it after a terminal-scrollback warning.
+
+Where to obtain provider keys, and the gotchas for each, is in
+[Credentials](credentials.md#kind-2-a-provider-console-you-need-an-account-possibly-a-payment-method).
+
+!!! warning "Shared defaults are for the local demo"
+    One password across local services is convenient, but one leak then reaches
+    several services. Use unique service passwords in production. Apply default
+    credentials before the first startup; changing `.env` later does not rotate
+    accounts already stored inside persistent volumes.
 
 ```bash
-./scripts/stack.sh secrets set OPENAI_API_KEY       # terminal echo is disabled
-./scripts/stack.sh secrets set ANTHROPIC_API_KEY    # optional
-```
-
-Where to get them, and the gotchas for each, is in [Credentials](credentials.md#kind-2-a-provider-console-you-need-an-account-possibly-a-payment-method).
-
-```bash
-./scripts/stack.sh secrets write     # renders .env, mode 600
 ./scripts/stack.sh doctor
 ```
 
@@ -140,11 +155,16 @@ Only three of those are layers you chose. **Six are Langfuse's and LibreChat's o
 
 | | URL | Account |
 |---|---|---|
-| Langfuse | <http://localhost:3000> | seeded by headless init — `LANGFUSE_INIT_USER_EMAIL` |
+| LiteLLM | <http://localhost:4000/ui> | `UI_USERNAME` / `UI_PASSWORD` — ID-based login |
+| Langfuse | <http://localhost:3000> | `LANGFUSE_INIT_USER_EMAIL` / `_PASSWORD` — email-based login |
 | LibreChat | <http://localhost:3080> | register on first visit |
-| MinIO | <http://localhost:9001> | `MINIO_ROOT_USER` |
+| MinIO | <http://localhost:9001> | `MINIO_ROOT_USER` / `_PASSWORD` |
 
 Langfuse should already have an organisation, a project **and** the API key pair — created on first boot from `LANGFUSE_INIT_*` rather than clicked through the UI. That is what stops the gateway from starting before the keys exist and tracing nothing. See [Credentials](credentials.md#kind-3-langfuse-keys-initialized-with-the-demo).
+
+To retrieve a configured login without printing every secret, re-open
+`secrets setup`, select that technology and credential, then use `c` to copy
+the value. `r` is available when terminal scrollback exposure is acceptable.
 
 ---
 

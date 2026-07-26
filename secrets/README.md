@@ -8,16 +8,18 @@ build context, or an AI coding tool's index.
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # d=default credentials, g=generate, w=write
+./scripts/stack.sh secrets setup --phase 1 # inside: d, provider keys, g, w
 ./scripts/stack.sh secrets status --all    # values are never printed
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # atomic .env write, mode 600
 ./scripts/stack.sh doctor
 ```
 
-`credentials.yaml` is the private source of truth. The wizard updates external
-values with hidden input; `.env` is generated from it and is what LiteLLM, Langfuse,
-LibreChat, and Terraform actually read. Never hand-edit `.env`.
+`credentials.yaml` is the private source of truth. The setup hub handles
+external values, visible configuration, shared login defaults, and locally
+generated secrets with the appropriate input mode. `.env` is generated from it
+and is what LiteLLM, Langfuse, LibreChat, and Terraform actually read. Never
+hand-edit `.env`.
 
 ```
 secrets/credentials.yaml  ──secrets write──►  .env  ──►  docker compose / terraform

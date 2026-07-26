@@ -2,7 +2,7 @@
 
 Why this stack is shaped the way it is: the failure mode it is built against, the one architectural decision everything else follows from, what was chosen at each layer and what was considered instead, and the regulatory context that makes self-hosting a requirement rather than a preference for some buyers.
 
-If you want to run something first, start at [Deployment](deployment.md) and come back.
+If you want to run something first, start at the [Workshop](workshop.md) and come back.
 
 ---
 

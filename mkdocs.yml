@@ -76,8 +76,8 @@ nav:
   - Build:
       - Workshop: workshop.md
       - Configuration: configuration.md
-      - Deployment: deployment.md
       - Credentials: credentials.md
+      - Deployment: deployment.md
   - Present:
       - Demo flow: demo-flow.md
 

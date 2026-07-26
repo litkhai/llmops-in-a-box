@@ -133,8 +133,7 @@ flowchart TB
 brew install yq
 
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup     # optional d=default credentials; then g and w
-./scripts/stack.sh secrets validate --phase 1
+./scripts/stack.sh secrets setup --phase 1  # inside: d, provider keys, g, w
 
 ./scripts/stack.sh doctor            # preflight
 ./scripts/stack.sh up                # Phase 1 — no GPU needed
