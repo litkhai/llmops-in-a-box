@@ -43,6 +43,32 @@ LANGFUSE_PORT=3100 LITELLM_PORT=4001 ./scripts/stack.sh up
 
 ## Step 1 — Credentials
 
+This is the only step where you handle secret material. At the end you will
+have:
+
+- one private inventory, `secrets/credentials.yaml`
+- one generated runtime file, `.env`
+- login credentials for LiteLLM, Langfuse, and MinIO
+- at least one external model-provider key
+- all internal signing, encryption, database, and gateway values generated
+  without being printed
+
+### Prepare four decisions
+
+Have these ready before opening the menu:
+
+| Input | Used for | Accepted shape |
+|---|---|---|
+| Default ID | LiteLLM, local ClickHouse, PostgreSQL, MinIO | 3–32 characters; start with lowercase; then lowercase letters, numbers, `_`, `-` |
+| Default email | Langfuse login | an email-shaped value such as `admin@example.com` |
+| Default password | compatible local service logins | at least 12 characters using letters, numbers, `.`, `_`, `~`, `-`; include uppercase, lowercase, and a number |
+| Provider API key | OpenAI and/or Anthropic | at least one for this workshop |
+
+The shared ID/password is a local-demo convenience. API keys, LiteLLM gateway
+keys, JWT secrets, salts, and encryption keys are never derived from it.
+
+### Initialize the private inventory
+
 ```bash
 brew install yq            # mikefarah v4 — the script refuses other builds
 
@@ -50,57 +76,174 @@ brew install yq            # mikefarah v4 — the script refuses other builds
 ./scripts/stack.sh secrets setup --phase 1
 ```
 
-You will see these main actions at the bottom of the first screen:
+`secrets init` creates `secrets/credentials.yaml` with mode `600`, or safely
+synchronizes any newly declared fields into an existing inventory. It does not
+replace values you already have.
+
+The Phase 1 setup screen should look like this on a fresh checkout:
 
 ```console
-[d] set default credentials   [g] generate missing internal values   [w] write .env
-Select a group [1-N], [d], [g], [w], or [q/Enter] finish:
+==> Credential setup  values stay hidden unless you choose reveal
+  GROUPS
+  1) Model providers                          0/2 configured
+  2) LiteLLM                                  1/4 configured
+  3) Langfuse                                 0/9 configured
+  4) Redis                                    0/1 configured
+  5) ClickHouse (local)                       1/2 configured
+  6) PostgreSQL                               1/2 configured
+  7) MinIO (Langfuse)                         1/2 configured
+  8) LibreChat                                0/4 configured
+
+  [d] set default credentials   [g] generate missing internal values   [w] write .env
+Select a group [1-8], [d], [g], [w], or [q/Enter] finish:
 ```
 
-The setup hub shows Phase 1 credentials grouped by technology. Work through it
-in this order:
+The non-zero initial counts are committed non-secret usernames such as
+`admin`, `clickhouse`, `postgres`, and `minio`; they are not generated secrets.
 
-1. Press `d` for **Set default credentials**. It asks for a default ID, email,
-   and password, then maps each to the technologies that use that login shape:
-   LiteLLM receives the ID and Langfuse receives the email.
-2. Open **Model providers** and enter at least one of `OPENAI_API_KEY` or
-   `ANTHROPIC_API_KEY`. External values use hidden input and are validated
-   before storage.
-3. Press `g` to generate every remaining internal key, salt, and encryption
-   value. Existing values are preserved.
-4. Press `w` to validate the inventory and atomically write `.env` with mode
-   `600`, then `q` to finish.
+### What each group contains
 
-After pressing `d`, expect all three prompts:
+| Group | What is configured | Where the values come from |
+|---|---|---|
+| Model providers | OpenAI and Anthropic API keys | external provider consoles |
+| LiteLLM | gateway master/salt keys and admin UI login | generated keys + default ID/password |
+| Langfuse | project keys, initial login, auth salt, encryption key, optional EE licence | generated values + default email/password + optional external licence |
+| Redis | authentication password | default password or generated fallback |
+| ClickHouse (local) | local username/password | default credentials |
+| PostgreSQL | local username/password | default credentials |
+| MinIO (Langfuse) | blob-store root username/password | default credentials |
+| LibreChat | credential-encryption key/IV and JWT secrets | generated values |
+
+The complete five-phase inventory also contains ClickHouse Cloud/MCP, RunPod,
+vLLM, Hugging Face, AWS, and the Phase 4 artifact MinIO. `--phase 1` keeps those
+groups out of this workshop menu.
+
+### 1. Set login defaults — `d`
+
+Press `d` at the **main menu**:
 
 ```console
+==> Set default credentials
+  Each technology receives the login field it supports: ID, email, or password.
 Enter DEFAULT_ID:
 Enter DEFAULT_EMAIL:
 Enter DEFAULT_PASSWORD (input hidden):
+  Will set 4 ID, 1 email, and 6 password field(s) in the current selection.
+  Replace those fields with the default credentials? [y/N]:
 ```
 
-The wizard does not ask for email merely by opening the setup screen. It asks
-when `d` is selected because email is one semantic default credential type,
-not a value every technology accepts.
+The mapping is semantic:
 
-All values land in the gitignored `secrets/credentials.yaml` at mode `600`.
-They stay hidden unless you explicitly select a configured item and choose `c`
-to copy it or `r` to reveal it after a terminal-scrollback warning.
+| Input | Phase 1 destinations |
+|---|---|
+| `DEFAULT_ID` | `UI_USERNAME`, `CLICKHOUSE_USER`, `POSTGRES_USER`, `MINIO_ROOT_USER` |
+| `DEFAULT_EMAIL` | `LANGFUSE_INIT_USER_EMAIL` |
+| `DEFAULT_PASSWORD` | LiteLLM UI, Langfuse login, Redis, ClickHouse, PostgreSQL, and MinIO passwords |
 
-Where to obtain provider keys, and the gotchas for each, is in
+Answer `y` only after checking the target counts. This action intentionally
+replaces the mapped account fields, but it does not touch external API keys or
+cryptographic secrets.
+
+!!! question "Why did it not ask for email?"
+    Email is not prompted merely by opening setup; press `d`. With
+    `--phase 1`, `DEFAULT_EMAIL` appears after a **valid** default ID. If the ID
+    is rejected, the action returns to the menu before reaching email. Use
+    3–32 lowercase/number/`_`/`-` characters beginning with a lowercase letter.
+    An `--only` or phase filter that excludes `LANGFUSE_INIT_USER_EMAIL` also
+    suppresses the email prompt deliberately.
+
+### 2. Add at least one provider key
+
+Choose `1) Model providers`, then select the key to enter:
+
+```console
+==> Model providers
+  NO   ENV                            TYPE       STATUS     NAME
+  1    OPENAI_API_KEY                 external   missing    OpenAI API key
+  2    ANTHROPIC_API_KEY              external   missing    Anthropic API key
+```
+
+The input is hidden. The wizard checks shape immediately — for example,
+OpenAI keys must begin with `sk-`, and Anthropic keys with `sk-ant-`. This is an
+offline format check; it cannot prove that the key is funded, unexpired, or
+authorised until a real request is made.
+
+One provider is enough to run the stack. Configure both to complete the
+cross-provider comparison in Steps 3–4. Use `b` to return to the main menu.
+
+Where to obtain provider keys, their scopes, and billing gotchas is in
 [Credentials](credentials.md#kind-2-a-provider-console-you-need-an-account-possibly-a-payment-method).
 
-!!! warning "Shared defaults are for the local demo"
+### 3. Generate the remaining internal values — `g`
+
+Back at the main menu, press `g`. It fills every still-missing field that has
+an allowlisted local generator:
+
+- LiteLLM master and salt keys
+- Langfuse project keys, auth secrets, salt, and encryption key
+- LibreChat encryption/JWT values
+- any local password for which you did not apply a default
+
+Existing values are kept. The generated-value count can differ between runs
+because setup is resumable and already configured fields are not replaced.
+No generated value is printed.
+
+The `g` shortcut is global to the inventory even when the visible groups are
+filtered with `--phase 1`. It may pre-generate harmless future-phase values
+such as the vLLM API key or artifact-store login; those remain unused until
+their phase is enabled.
+
+### 4. Validate and write `.env` — `w`
+
+Press `w` at the main menu. It:
+
+1. applies the same offline format validation used during input
+2. writes a mode-`600` temporary file
+3. atomically replaces `.env`
+4. backs up an existing `.env` to `.env.bak`
+
+You may see a warning that some credentials remain blank. That is expected for
+unused providers, the optional Langfuse Enterprise licence, and future phases.
+An `invalid` message is not expected and must be fixed before continuing.
+
+Press `q` after `w`. If you quit after changing the inventory but before
+writing, the wizard warns that `.env` is stale; simply reopen setup and press
+`w`.
+
+### Menu reference
+
+| Context | Key | Action |
+|---|:---:|---|
+| Main menu | `d` | Set default ID/email/password |
+| Main menu | `g` | Generate all missing internal values |
+| Main menu | `w` | Validate and write `.env` |
+| Main menu | `q` / Enter | Finish |
+| Group menu | number | Open a credential |
+| Configured value | `c` | Copy it to the system clipboard |
+| Configured value | `r` | Reveal it after a terminal-scrollback warning |
+| Configured value | `e` | Replace and revalidate it |
+| Configured value | `d` | Delete it — here `d` means delete, not defaults |
+| Generated value | `g` | Generate or regenerate that one value |
+| Submenu | `b` | Go back one level |
+
+### Verify before starting containers
+
+Run the non-printing status and validation commands, then the full preflight:
+
+```bash
+./scripts/stack.sh secrets status --phase 1
+./scripts/stack.sh secrets validate --phase 1
+./scripts/stack.sh doctor
+```
+
+**Checkpoint:** `doctor` exits 0 and the secrets section is green apart from
+optional keys you deliberately skipped.
+
+!!! warning "Shared defaults are for a disposable local demo"
     One password across local services is convenient, but one leak then reaches
     several services. Use unique service passwords in production. Apply default
     credentials before the first startup; changing `.env` later does not rotate
     accounts already stored inside persistent volumes.
-
-```bash
-./scripts/stack.sh doctor
-```
-
-**Checkpoint:** `doctor` exits 0 and the secrets section is green apart from keys you chose to skip.
 
 ```console
 ==> Secrets  (.env, phases 1..1)
@@ -113,6 +256,20 @@ Where to obtain provider keys, and the gotchas for each, is in
 
 !!! warning "Do not edit `.env` by hand"
     It is generated from `secrets/credentials.yaml` and overwritten on every `secrets write`. Edit the source, then re-run write.
+
+### Resume, inspect, or repair
+
+- Setup is resumable. Re-run `secrets setup --phase 1`; configured values are
+  shown as `set` without displaying them.
+- To retrieve a login, open its technology and use `c`. Clear the clipboard
+  after use.
+- Use `r` only when terminal scrollback exposure is acceptable.
+- A rejected value is not stored. Correct it and retry.
+- `./scripts/stack.sh secrets set ENV_NAME` remains available for one hidden
+  value; `secrets generate --phase 1` and `secrets write` remain useful
+  automation primitives under the same script.
+- `secrets/credentials.yaml` is the editable source of truth. `.env` and
+  `.env.bak` are generated runtime files.
 
 ---
 
