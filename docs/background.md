@@ -2,7 +2,8 @@
 
 Why this stack is shaped the way it is: the failure mode it is built against, the one architectural decision everything else follows from, what was chosen at each layer and what was considered instead, and the regulatory context that makes self-hosting a requirement rather than a preference for some buyers.
 
-If you want to run something first, start at the [Workshop](workshop.md) and come back.
+If you want to run something first, start at
+[Getting started](getting-started.md).
 
 ---
 
@@ -75,9 +76,13 @@ Traces, sessions, cost, datasets, scores and evals in one place.
 
 **Considered:** LangSmith (excellent, but SaaS-first and tied to the LangChain ecosystem); Arize Phoenix; Helicone; OpenLLMetry/OpenTelemetry-based setups feeding a generic backend.
 
-**Why Langfuse:** it self-hosts, which is a hard requirement here; the v3 architecture puts traces in ClickHouse, which matches the workload (see below); and datasets, scores and evals live in the same product as the traces, so promoting a real production trace into an eval set is one click rather than an export pipeline. That last point is what makes [Phase 5.3](phases.md#53-langfuse-evaluations) practical.
+**Why Langfuse:** it self-hosts, stores trace workloads in ClickHouse, and
+keeps datasets, scores, and evaluations beside the traces. That makes promoting
+a production trace into a later evaluation set practical.
 
-**The trade:** self-hosting Langfuse v3 is not one container. It needs ClickHouse, Postgres, Redis and an S3-compatible blob store — four supporting services for one layer. That is a real operational cost and the single most surprising thing about standing this stack up.
+**The trade:** self-hosting Langfuse is not one container. It needs
+ClickHouse, Postgres, Redis, an S3-compatible blob store, and a worker. That
+operational cost is visible even in the local demo.
 
 ### Serving — vLLM
 
@@ -103,7 +108,10 @@ GPU hosting for the serving layer.
 
 **Why RunPod for this stack:** per-second billing with no charge when a pod is stopped, and prebuilt vLLM templates, which together make the GPU half of the demo cheap and fast to stand up. For a reference architecture that gets brought up and torn down repeatedly, that matters more than committed-use discounts.
 
-**The trade, stated plainly:** RunPod is not where a regulated enterprise will run production inference. It is the fastest way to *prove the architecture* with a real GPU. The point of `--target` is that the same config moves to EC2, or to an on-premise GPU, without a rewrite — and for the buyers who need 망분리, on-premise is the destination.
+**The trade, stated plainly:** RunPod is not the likely production destination
+for a regulated enterprise. It is the planned way to prove the architecture
+with a real GPU. Moving serving to EC2 or on-premises remains a design goal,
+not a capability implemented in this repository.
 
 ### Tools — MCP, with ClickHouse Cloud first
 
@@ -129,9 +137,9 @@ LLM tracing has an unusual workload shape:
 
 A row-oriented transactional database is built for the opposite of most of that. It can hold the data, and Langfuse v2 did exactly that in Postgres — but the aggregate-on-read queries that make the dashboard useful scan far more data than they return, and that is where a row store spends its time reading columns nobody asked for.
 
-A column-oriented OLAP store reads only the columns in the query, compresses each column far better because neighbouring values are similar, and is designed for exactly the append-then-aggregate pattern above. That is why Langfuse v3 moved traces to ClickHouse and left metadata in Postgres — each store doing the workload it suits.
-
-The practical consequence for this stack: the architecture you run on a laptop is the same one that runs at millions of traces per day. The scale story does not require a different design, which is not something you can say about every component here.
+A column-oriented OLAP store reads only the columns in the query and is
+designed for append-then-aggregate workloads. Langfuse therefore uses
+ClickHouse for traces and Postgres for transactional metadata.
 
 ---
 
@@ -186,55 +194,16 @@ Two consequences for how this stack is built:
 
 ## Glossary
 
-Terms used throughout these docs, in the sense they are used here.
-
-### Gateway and routing
-
-| Term | Meaning |
+| Term | Meaning here |
 |---|---|
-| **Gateway** | A proxy every model request passes through. Here: LiteLLM, presenting one OpenAI-compatible endpoint. |
-| **Model alias** | A stable name (`gpt-4o`, `qwen-7b`) that applications use, mapped by the gateway to an actual provider and model. Applications depend on the alias, not the model. |
-| **Virtual key** | A gateway-issued API key, scoped and budgeted per consumer. Lets you attribute and cap spend per team without distributing provider keys. |
-| **Fallback** | An alternative model used when the first choice fails — here `qwen-7b → gpt-4o`, so a stopped GPU pod degrades rather than errors. |
-| **Context window** | The maximum tokens a model can consider at once. `qwen-7b` is 32k here, `gpt-4o` 128k — which is why fallback is not always like-for-like. |
-| **Context-based routing** | Choosing a model from properties of the request, most usefully its length. See [Phase 5.1](phases.md#51-context-based-routing-in-litellm). |
-
-### Observability
-
-| Term | Meaning |
-|---|---|
-| **Trace** | The record of one logical operation end to end. For a simple call, one request; for an agent, the whole tool-use loop. |
-| **Span** | A step inside a trace. An agent run produces nested spans — planning, each tool call, the final completion. |
-| **Session** | Related traces grouped as one conversation, so multi-turn interactions are not scattered. |
-| **Score** | A rating attached to a trace or a dataset item, whether from a human, a heuristic, or a judge model. |
-| **Dataset** | A fixed set of inputs, ideally promoted from real traces, used to compare models or prompt versions on the same ground. |
-| **LLM-as-judge** | Using a model to score another model's output against a rubric. Cheap and scalable; biased if the judge is also a candidate. |
-| **High cardinality** | Columns with very many distinct values — trace IDs, session IDs, user IDs. The property that makes this an OLAP workload. |
-
-### Inference internals
-
-Relevant to [Phase 3](phases.md#phase-3-self-hosted-serving), and to reading [Phase 4b](phases.md#phase-4b-kv-cache-offload-at-fleet-scale) without taking the vendor page on faith.
-
-| Term | Meaning |
-|---|---|
-| **TTFT** | Time to first token. Dominated by prefill, so it grows with prompt length. What a user experiences as "did it hear me". |
-| **TPOT** | Time per output token. Governs how fast the response streams once started. |
-| **Prefill** | The pass that processes the whole input prompt before generation begins. Compute-bound, and the expensive part of a long prompt. |
-| **Decode** | Generating output tokens one at a time after prefill. Memory-bandwidth-bound. |
-| **KV cache** | Cached attention key/value tensors for tokens already processed, so they are not recomputed for every new token. Grows with context length and consumes GPU memory. |
-| **Prefix caching** | Reusing the KV cache for a shared prompt prefix across requests, skipping its prefill entirely. Built into vLLM. |
-| **KV-cache offload** | Moving KV cache off GPU memory — to CPU RAM, disk or flash — so more of it can be retained and reused. What MinIO MemKV addresses at fleet scale. |
-| **Semantic cache** | A different mechanism: embed the incoming prompt and return a stored response if a previous prompt was similar enough. Skips inference entirely, and can serve a near-miss as if exact. |
-| **Continuous batching** | Adding and retiring requests from an in-flight batch instead of waiting for a batch to complete. The main reason vLLM holds up under concurrency. |
-
-### Tools and storage
-
-| Term | Meaning |
-|---|---|
-| **MCP** | Model Context Protocol — an open protocol for exposing tools and data to models over a uniform interface, so a tool server works across clients. |
-| **Tool call** | A model-issued request to run a declared function, with the result fed back into the conversation. Traced as its own span here. |
-| **Erasure coding** | Storing data with computed parity so a device failure loses nothing. Included in AIStor Free. |
-| **Bitrot protection** | Detecting silent data corruption by checksum rather than trusting the disk. Also included. |
+| Gateway | The shared OpenAI-compatible model endpoint; LiteLLM in this stack |
+| Model alias | A stable client-facing name mapped to a provider model |
+| Virtual key | A gateway-issued consumer key with attribution and limits |
+| Trace / span | One logical operation / one step within it |
+| Context window | The maximum input and output token capacity of a model |
+| Prefix caching | Reusing attention state for an identical prompt prefix |
+| Semantic cache | Reusing a completed answer for a similar prompt; a different mechanism |
+| MCP | A protocol for exposing tools and data to model clients |
 
 ---
 
@@ -244,6 +213,6 @@ Relevant to [Phase 3](phases.md#phase-3-self-hosted-serving), and to reading [Ph
 |---|---|
 | Understand the build order and what each phase proves | [Build-out phases](phases.md) |
 | See how one file describes the whole stack | [Configuration](configuration.md) |
-| Actually run it | [Deployment](deployment.md) |
+| Prepare and run it | [Getting started](getting-started.md) |
 | Know which keys exist and how they are handled | [Credentials](credentials.md) |
 | Present it | [Demo flow](demo-flow.md) |

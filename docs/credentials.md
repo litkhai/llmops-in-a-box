@@ -1,329 +1,138 @@
 # Credentials
 
-Every API key and local service login the stack touches — OpenAI, Anthropic,
-RunPod, AWS, ClickHouse Cloud, LiteLLM, Langfuse, MinIO, and their backing
-services — is inventoried in **one** file.
+All provider keys and local service credentials are inventoried in one private
+file:
 
-```mermaid
-flowchart LR
-    W["<b>secrets setup</b><br/><small>technology groups · typed input</small>"]
-    C["<b>secrets/credentials.yaml</b><br/><small>private · mode 600</small>"]
-    E["<b>.env</b><br/><small>generated · mode 600</small>"]
-    D["docker compose"]
-    T["terraform"]
-
-    W --> C
-    C -->|"secrets write"| E
-    E --> D
-    E --> T
-
-    classDef src fill:#0969da,stroke:#0969da,color:#fff
-    classDef gen fill:#bf8700,stroke:#bf8700,color:#fff
-    class C src
-    class E gen
+```text
+secrets/credentials.yaml  ── secrets write ──>  .env  ──>  runtime
+       private, 0600                         generated, 0600
 ```
 
-`secrets/credentials.yaml` is the private source of truth. The setup hub groups
-the complete inventory by technology, hides secret input, and keeps stored
-values masked by default. `.env` is derived from it and **gets overwritten**.
-Values are printed only when you explicitly choose `r` after a
-terminal-scrollback warning.
+`secrets/credentials.yaml` is the source of truth. `.env` is generated and
+overwritten; do not edit it manually. Commands mask stored values unless the
+user explicitly chooses to reveal one.
 
----
-
-## Setup
+## First-time setup
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # d=default credentials, g=generate, w=write
-./scripts/stack.sh secrets status --all    # set / missing / invalid, no values
-./scripts/stack.sh secrets validate --all  # offline format checks
+./scripts/stack.sh secrets setup --phase 1
+```
+
+Use the setup menu in this order:
+
+1. `d` — set the demo's default ID, email, and password.
+2. Open **Model providers** and enter at least one provider key.
+3. `g` — generate missing internal values.
+4. `w` — validate and write `.env`.
+5. `q` — finish.
+
+Then verify without printing values:
+
+```bash
+./scripts/stack.sh secrets status --phase 1
+./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh doctor
 ```
 
-The first screen ends with the main actions:
+### Menu reference
 
-```console
-[d] set default credentials   [g] generate missing internal values   [w] write .env
-Select a group [1-N], [d], [g], [w], or [q/Enter] finish:
-```
-
-| Where | Key | Action |
+| Context | Key | Action |
 |---|:---:|---|
-| Main menu | `d` | **Set default credentials** — prompt for the ID, email, and password types used by the current phase/filter |
-| Main menu | `g` | Generate all missing internal credentials without replacing existing values |
-| Main menu | `w` | Validate the inventory and atomically write `.env` |
-| Main menu | `q` / Enter | Finish setup |
-| Technology menu | number | Open one credential for input or management |
-| Configured credential | `c` / `r` | Copy to clipboard / reveal after a scrollback warning |
-| Configured credential | `e` / `d` | Replace / delete the selected value |
-| Generated credential | `g` | Generate or regenerate that one value |
-| Submenu | `b` | Return to the previous menu |
+| Main menu | `d` | Set default login fields available in the current filter |
+| Main menu | `g` | Generate missing internal values |
+| Main menu | `w` | Validate and atomically write `.env` |
+| Main menu | `q` / Enter | Finish |
+| Group | number | Select a credential |
+| Configured value | `c` | Copy it to the clipboard |
+| Configured value | `r` | Reveal after a scrollback warning |
+| Configured value | `e` | Replace and validate |
+| Configured value | `d` | Delete |
+| Generated value | `g` | Generate or regenerate |
+| Submenu | `b` | Go back |
 
-!!! important "Email is collected by `d`, not on menu entry"
-    With `--phase 1`, choosing `d` prompts in this order:
-    `DEFAULT_ID` → `DEFAULT_EMAIL` → `DEFAULT_PASSWORD`. The email maps to
-    `LANGFUSE_INIT_USER_EMAIL`; the ID maps to LiteLLM and compatible local
-    service usernames. If a phase or `--only` filter contains no email target,
-    the email prompt is intentionally omitted.
+With `--phase 1`, the default action prompts for ID, email, and password. The
+email maps to `LANGFUSE_INIT_USER_EMAIL`; it is not requested simply by opening
+the setup menu. A phase or `--only` filter with no email target omits the
+prompt.
 
-For a first run, use the setup menu in this order:
+The default mapping is semantic:
 
-1. `d` — optionally set a default ID, email, and password. Each technology
-   receives the login field it supports.
-2. Open **Model providers** and enter the external API keys you intend to use.
-3. `g` — generate every missing internal key, salt, and encryption value.
-4. `w` — validate everything and atomically write `.env`.
-5. `q` — finish. Re-run the menu at any time; existing values are preserved
-   unless you explicitly replace, delete, or regenerate them.
-
-You can also operate on one phase or one key:
-
-```bash
-./scripts/stack.sh secrets generate --phase 1
-./scripts/stack.sh secrets set OPENAI_API_KEY
-./scripts/stack.sh secrets status --phase 1
-./scripts/stack.sh secrets validate --phase 1
-```
-
-`generate` stores locally generated values directly and reports only status.
-Existing values are preserved unless `--force` is supplied. `set` accepts one
-value with terminal echo disabled and rejects invalid shapes before persisting
-it. Phase 5 currently has no dedicated credentials, which is reported
-explicitly rather than treated as an error.
-
----
-
-## Where each credential comes from
-
-The inventory contains more than forty values across all five phases, but only
-a minority come from an external provider. Sorting them by *where a value
-comes from* is what makes this tractable — and it is also what the automation
-below is built on.
-
-Each entry's `console:` field in `secrets/credentials.yaml` is the authoritative pointer; this is the map.
-
-### Kind 1 — self-generated (no browser, no account)
-
-These are keys and passwords for services this stack runs itself. Nobody
-issues them to you; `secrets generate` creates and stores strong values without
-printing them.
-
-`LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `UI_PASSWORD` ·
-`LANGFUSE_PUBLIC_KEY` ·
-`LANGFUSE_SECRET_KEY` · `NEXTAUTH_SECRET` · `LANGFUSE_SALT` ·
-`LANGFUSE_ENCRYPTION_KEY` · `LANGFUSE_INIT_USER_PASSWORD` ·
-`REDIS_AUTH` · `CLICKHOUSE_PASSWORD` ·
-`POSTGRES_PASSWORD` · `MINIO_ROOT_PASSWORD` ·
-`LIBRECHAT_CREDS_KEY` · `LIBRECHAT_CREDS_IV` · `LIBRECHAT_JWT_SECRET` ·
-`LIBRECHAT_JWT_REFRESH_SECRET` · `ARTIFACT_MINIO_ROOT_USER` ·
-`ARTIFACT_MINIO_ROOT_PASSWORD` · `VLLM_API_KEY`
-
-```bash
-./scripts/stack.sh secrets generate --phase 1
-```
-
-`VLLM_API_KEY` is in this list for a reason worth noticing: it is not issued by RunPod. You choose a value and pass it to `vllm serve --api-key` — see vLLM's [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) docs. That is what makes it easy to skip, and skipping it leaves [an open GPU on the internet](#security-posture).
-
-### Kind 2 — a provider console (you need an account, possibly a payment method)
-
-Each row links the **vendor's own guide**, not just the console, because the console layout changes more often than the docs do.
-
-| Credential | Official guide | Console | What to create | Watch for |
-|---|---|---|---|---|
-| `OPENAI_API_KEY` | [API authentication](https://platform.openai.com/docs/api-reference/authentication/api-keys) · [reference overview](https://developers.openai.com/api/reference/overview#authentication) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | a project-scoped key | shown **once**. A project with no credit returns 429 on the first call, which reads exactly like a bad key |
-| `ANTHROPIC_API_KEY` | [Get started with Claude](https://docs.anthropic.com/en/docs/initial-setup) · [API overview](https://docs.anthropic.com/en/api/getting-started) | [console.anthropic.com](https://console.anthropic.com) | a workspace key, in Account Settings | also shown once, and you pick an **expiry date** at creation — a key that worked last quarter may simply have lapsed |
-| `LANGFUSE_EE_LICENSE_KEY` | [Enterprise license key](https://langfuse.com/self-hosting/license-key) | Langfuse commercial agreement | the self-hosted license key | optional; leave blank to run the OSS feature set |
-| `RUNPOD_API_KEY` | [Manage API keys](https://docs.runpod.io/get-started/api-keys) | Settings → API Keys | permission **Read Only** unless the script must start pods | RunPod does not store the key — if you lose it, you create a new one. Needs account balance before a pod starts. Phase 3 only |
-| `CLICKHOUSE_CLOUD_HOST` / `_USER` / `_PASSWORD` | [Manage database users](https://clickhouse.com/docs/cloud/security/manage-database-users) · [Common access management queries](https://clickhouse.com/docs/cloud/security/common-access-management-queries) · [`CREATE USER`](https://clickhouse.com/docs/sql-reference/statements/create/user) | [clickhouse.cloud](https://clickhouse.cloud) → service → Settings | a **dedicated read-only user**, not an SQL-console login | an agent holding this has its full grants. Note SQL console statements run as `sql-console:<your-email>`, *not* as the user you create — so test the grants with the real credential, not in the console |
-| AWS | [IAM Identity Center + CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) | `aws configure sso` | an SSO profile, or a scoped static key pair where SSO is unavailable | prefer SSO. Leave the static key variables blank when using `AWS_PROFILE` |
-
-### Kind 3 — Langfuse keys initialized with the demo
-
-`LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY`
-
-LiteLLM needs the Langfuse key pair when it starts. Waiting for a user to open
-the UI and create a project would therefore require a fragile two-pass setup.
-The Phase 1 Compose file instead uses Langfuse headless initialization, and the
-wizard generates the project key pair as internal demo defaults.
-
-!!! tip "Headless initialization removes the two-pass dance"
-    Langfuse creates the organization, project, and key pair on first boot from
-    environment variables:
-
-    ```bash
-    LANGFUSE_INIT_ORG_ID=llmops
-    LANGFUSE_INIT_PROJECT_ID=sovereign-ai-stack
-    LANGFUSE_INIT_PROJECT_PUBLIC_KEY=lf_pk_...
-    LANGFUSE_INIT_PROJECT_SECRET_KEY=lf_sk_...
-    ```
-
-    `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` use those same values, so
-    tracing is configured from the first gateway start.
-
-    The variables initialize rather than reconcile: they only take effect when
-    the resources do not exist. A project requires its organization and both
-    project keys. The user email and password are required only when also
-    creating an initial user.
-
-    This is the recommended path for this stack and the UI route is the fallback. Where a `.env` cannot hold them, note that Langfuse also documents a [public API](https://langfuse.com/docs/api-and-data-platform/features/public-api) and [SCIM/Org API](https://langfuse.com/docs/administration/scim-and-org-api) for provisioning. If you are ever unsure where a key lives, Langfuse has a page for exactly that question: [Where do I find my API keys?](https://langfuse.com/faq/all/where-are-langfuse-api-keys)
-
-### Kind 4 — emitted by provisioning (copy the output)
-
-| Credential | Comes from | Note |
-|---|---|---|
-| `VLLM_API_BASE` | the RunPod pod's HTTP proxy URL | **must end in `/v1`** — `https://<pod-id>-8000.proxy.runpod.net/v1` |
-| `MCP_CLICKHOUSE_URL` | wherever the MCP server is reachable | Phase 2 |
-
-### Setup menu reference
-
-The unified setup hub shows the complete inventory in technology
-groups: model providers, LiteLLM, Langfuse, Redis, ClickHouse, PostgreSQL,
-MinIO, LibreChat, the MCP layer, self-hosted serving, AWS, and artifact storage.
-Selecting a group shows each value's input type and state.
-
-- `external` values use hidden input and immediate format validation.
-- `config` and `default` values use visible input.
-- `generated` values can be generated individually without being printed.
-- `d` runs **Set default credentials**. It asks for ID, email, and password
-  only when the current selection contains a compatible target.
-- `g` generates every missing internal value across the stack.
-- `w` validates the inventory and writes `.env` atomically with mode `600`.
-- On a configured value, `c` copies it to the system clipboard and `r` reveals
-  it only after an explicit terminal-scrollback warning.
-
-`b` returns to the technology menu after any action. `--phase N` and
-`--only ENV_NAME` remain available as filters for focused work.
-
-The AWS group accepts either an `AWS_PROFILE` for SSO or both halves of a
-static key pair. Its status reports the selected method instead of treating all
-three fields as required.
-
-The default-credential mapping is semantic rather than positional:
-
-| Default field | Technology fields |
+| Default | Destinations |
 |---|---|
-| ID | LiteLLM `UI_USERNAME`, PostgreSQL, local ClickHouse, both MinIO users |
-| Email | Langfuse `LANGFUSE_INIT_USER_EMAIL` |
-| Password | LiteLLM and Langfuse login passwords plus compatible local service passwords |
+| ID | LiteLLM UI, local ClickHouse, PostgreSQL, MinIO accounts |
+| Email | Langfuse initial user |
+| Password | Compatible local service logins |
 
-Langfuse's optional display name remains independently editable. The shortcut
-does not reuse the password for API keys, LiteLLM gateway keys, JWT/signing
-secrets, encryption keys, or externally issued credentials.
+Provider keys, LiteLLM gateway keys, JWTs, salts, and encryption keys remain
+unique. Shared logins are convenient for a disposable local demo but should be
+replaced with per-service credentials in production.
 
-Use default credentials before the first stack startup. Once a persistent database or
-object-store volume exists, changing only `.env` does not rotate the account
-inside that service; coordinate an in-service rotation or recreate disposable
-demo volumes. A shared password is convenient for a local demo but expands the
-blast radius of one leak, so use unique service passwords for production.
+## Where values come from
 
----
+### External accounts
 
-## Automating the input
+These values must be obtained from their provider or environment:
 
-Filling this in by hand is the single most error-prone part of standing the stack up, and the errors surface late — usually as a failed request in front of an audience. Worth automating. The design matters more than the code, so here is the reasoning.
+| Scope | Credentials | Note |
+|---|---|---|
+| Phase 1 models | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | At least one is needed for the workshop |
+| Optional Langfuse | `LANGFUSE_EE_LICENSE_KEY` | Leave blank for the OSS feature set |
+| Phase 2 | ClickHouse Cloud host, user, password; MCP URL | Use a dedicated read-only database user |
+| Phase 3 | `RUNPOD_API_KEY`, `VLLM_API_BASE`, Hugging Face token if needed | The vLLM base URL must end in `/v1` |
+| AWS target | `AWS_PROFILE` or a static access-key pair | Prefer IAM Identity Center / SSO |
 
-### Why a naive prompt loop is the wrong shape
+The `console` and `notes` fields in the credential inventory contain the
+provider-specific acquisition and scope guidance.
 
-"Iterate the inventory and ask for each value" fails on all three of the distinctions above:
+AWS accepts either:
 
-- **About half should never be typed.** Prompting for `POSTGRES_PASSWORD` invites a human to choose a weak one. Kind 1 should be generated without asking.
-- **Some should not be asked for at all.** Asking for `LANGFUSE_PUBLIC_KEY` before Langfuse is running has no correct answer — and with headless initialization it has no *question*, because the wizard should generate it and hand it to Langfuse. Asking for `VLLM_API_BASE` in Phase 1 is simply noise.
-- **A typo survives until it costs something.** A key pasted with a trailing newline or from the wrong workspace looks identical to a good one in a file.
+- `AWS_PROFILE` for SSO, or
+- both `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 
-So the classification is not documentation — it is the control flow.
+Static keys are not required when an SSO profile is selected.
 
-### The implemented flow
+### Locally generated values
 
-```
-stack.sh secrets setup [--phase 1..5] [--only ENV_NAME]
+Internal gateway keys, salts, encryption values, JWT secrets, database
+passwords, and demo Langfuse project keys are generated offline:
 
-  load the complete inventory once
-  show a numbered menu grouped by technology
-  select one value to input, generate, replace, or clear
-  configured values offer explicit copy or reveal actions
-  return to the group after each action; b returns to the main menu
-  d maps validated default ID/email/password fields to compatible technologies
-  g generates all missing internal values
-  w validates and atomically writes .env
-  press q or Enter to finish
-  validate before an entered value is persisted
+```bash
+./scripts/stack.sh secrets generate --phase 1
 ```
 
-The same primitives are also available independently: `secrets init` creates
-and synchronizes the private inventory, `secrets generate --phase N` explicitly
-fills or regenerates local values, `secrets set NAME` accepts one hidden
-external value, and `secrets status` / `secrets validate` are safe to use while
-screen-sharing. `secrets write` remains available for non-interactive
-automation.
+Existing values are preserved unless `--force` is explicitly supplied. The
+setup menu's `g` shortcut fills missing generated values across the inventory,
+including harmless future-phase values.
 
-Langfuse project keys are now included in the automatically generated demo
-defaults and wired into the Phase 1 Compose headless initialization.
+Langfuse project keys are chosen before first boot and passed through
+`LANGFUSE_INIT_*`. This lets Langfuse create the organization, project, user,
+and key pair while LiteLLM starts with tracing already configured.
 
-### A validation ladder, cheapest first
+## Focused and automated use
 
-| Level | Checks | Cost | Catches |
-|---|---|---|---|
-| **Shape** | prefix, length, no whitespace | free, offline | paste errors, truncation, trailing newline — most real mistakes |
-| **Liveness** | one minimal authenticated call | one request | revoked keys, wrong account, no credit |
-| **Scope** | the credential can do what is needed, **and not more** | a few requests | over-privileged credentials |
-
-`secrets validate` implements the first level offline. It checks known
-prefixes, lengths, URL shapes, AWS identifiers and regions, and rejects
-multi-line input or the unsafe `0.0.0.0/0` CIDR. It does not make billable
-provider requests or claim that a key is live; liveness and least-privilege
-scope checks remain provider-specific follow-up work.
-
-The third level is the one worth building deliberately, because it is the only one that catches a *dangerous* success. For the ClickHouse Cloud user, "valid" is not enough — the check should assert that a `SELECT` succeeds **and that a write fails**. A credential that passes both is verified least-privilege. A credential that passes only the first is a finding.
-
-That inverts the usual instinct. Most credential validation asks *does this work?*; here the useful question is also *what else does this work for?*
-
-### Handling the value safely inside the script
-
-A wizard that collects secrets is a new place for secrets to leak. Non-negotiables:
-
-- `read -rs` — secret input is never echoed; an explicit `r` reveal is the only
-  path that prints a stored value and it warns that terminal scrollback will retain it
-- **never pass a secret as an argument** — argv is world-readable via `ps`; use stdin or the environment
-- `set +x` around the block, so running the script with tracing on does not print every value
-- `umask 077` before writing, and write to a temp file in the same directory then `mv` — atomic, with no window where a half-written file has loose permissions
-- unset the variable as soon as it is persisted
-
-### Idempotency, because setup gets interrupted
-
-- `secrets generate` preserves an existing value unless `--force` is explicit
-- the interactive wizard defaults to keeping a set value; replacing one
-  requires an item action, while Set default credentials shows target counts
-  and requires confirmation before its mapped fields are overwritten
-- a run that dies halfway leaves earlier answers intact and can be resumed
-- nothing is overwritten silently — that is how a working key gets replaced by a typo
-
-### Where this actually wants to end up
-
-`stack.yaml` already declares the seam:
-
-```yaml
-secrets:
-  provider: dotenv          # dotenv | aws-ssm | vault
+```bash
+./scripts/stack.sh secrets setup --phase 3
+./scripts/stack.sh secrets set OPENAI_API_KEY
+./scripts/stack.sh secrets status --all
+./scripts/stack.sh secrets validate --all
+./scripts/stack.sh secrets write
 ```
 
-Only `dotenv` is implemented, but the field is the right abstraction and the wizard should be written against it from the start: **collection and persistence are separate concerns.** A demo persists to `.env`; a real deployment persists to SSM Parameter Store or Vault and never writes a file at all.
+`set` uses hidden terminal input and validates before persisting. `write`
+creates `.env` atomically with mode `600`. Setup is resumable and does not
+replace configured values without an explicit replace, delete, regenerate, or
+confirmed default action.
 
-Building the wizard to assume a file is how "just for the demo" quietly becomes the production path. Building it against the provider seam means the production story is a backend, not a rewrite.
-
-### What deliberately stays manual
-
-- **Creating accounts and adding payment methods.** That is a purchasing decision with a human owner, and scripting it buys nothing.
-- **Rotating provider keys from the same script that stores them.** Rotation should be initiated where revocation happens — at the provider.
-- **Scraping the Langfuse UI for its keys.** Brittle against every release.
-  Headless initialization is the recommended single-pass path; a manually
-  created key pair can still be entered through `secrets set`.
-
----
+Validation is offline. It checks prefixes, lengths, whitespace, URLs, AWS
+identifiers, and unsafe CIDRs. It does **not** prove that a provider key is
+funded, unexpired, live, or least-privileged. Those checks require
+provider-specific authenticated requests.
 
 ## Inventory format
 
-Each entry records more than a value — where to get it, what scopes it needs, who owns it, and how often to rotate. The file doubles as an audit artifact rather than a bag of strings.
+The committed `secrets/credentials.example.yaml` defines the structure without
+values:
 
 ```yaml
 - name: ClickHouse Cloud user
@@ -331,110 +140,66 @@ Each entry records more than a value — where to get it, what scopes it needs, 
   env: CLICKHOUSE_CLOUD_USER
   value: ""
   input: config
-  console: https://clickhouse.cloud → service → Settings → Users
+  console: https://clickhouse.cloud
   scopes: [SELECT]
-  notes: >-
-    Create a dedicated READ-ONLY user for the MCP server. An agent with a
-    tool has the user's full grants — do not reuse the admin account.
   owner: ""
   rotates: 90d
 ```
 
+Important fields:
+
 | Field | Purpose |
 |---|---|
-| `env` | The variable name the stack reads — must match `stack.yaml` `secrets:` |
-| `value` | The secret itself. Empty in the committed template |
-| `console` | Where to obtain or rotate it |
-| `generate` | Allowlisted generator ID, such as `hex-16`; never a shell command |
-| `input` | Input behavior: hidden external value, visible `config`, or visible committed `default` |
-| `default_credential` | Optional semantic mapping: `id`, `email`, or `password` for Set default credentials |
-| `required` | Set to `false` for values such as the Enterprise license that may be skipped |
-| `scopes` | Least-privilege grants this credential should have |
-| `phase` | Which build-out phase needs it |
-| `owner` / `rotates` | Accountability and cadence for audits |
+| `env` | Runtime variable name; must agree with `stack.yaml` |
+| `value` | Private value, empty in the committed template |
+| `input` | External hidden input, visible config, or committed default |
+| `generate` | Allowlisted local generator |
+| `default_credential` | Optional `id`, `email`, or `password` mapping |
+| `required` | Whether an empty value is an error |
+| `phase` | First phase that needs the value |
+| `scopes`, `owner`, `rotates` | Least privilege and accountability |
 
----
+## Storage and ignore coverage
 
-## Ignore coverage
-
-`secrets/credentials.yaml` and `.env` are excluded from git, from Docker build contexts, and from every AI coding tool with a repo-level exclusion mechanism.
-
-| Tool | Mechanism | File |
-|---|---|---|
-| Git | ignore rules | `.gitignore` |
-| Docker | build-context exclusion | `.dockerignore` |
-| Claude Code | `permissions.deny` on `Read` | `.claude/settings.json` |
-| Cursor | ignore rules | `.cursorignore` |
-| JetBrains AI Assistant | ignore rules | `.aiignore` |
-| Gemini Code Assist | ignore rules | `.aiexclude`, `.geminiignore` |
-| Codeium / Windsurf | ignore rules | `.codeiumignore` |
-| Aider | ignore rules | `.aiderignore` |
-| Continue | ignore rules | `.continueignore` |
-| OpenAI Codex CLI | honours `.gitignore`; `.codexignore` as belt-and-braces | `.codexignore` |
-
-!!! danger "GitHub Copilot is the exception"
-    Copilot has **no repo-level ignore file**. Content exclusions are configured server-side, per repository or organisation, under *Settings → Copilot → Content exclusions*. Add `secrets/**`, `.env`, and `**/*.tfvars` there.
-
-    Until you do, assume Copilot can see these files.
-
-### Verifying
+The private inventory and `.env` are excluded from Git, Docker build contexts,
+and supported AI-tool indexes. Verify the rules and Git history with:
 
 ```bash
 ./scripts/stack.sh secrets audit
 ```
 
-```console
-==> Ignore coverage
-  ✓ git ignores .env
-  ✓ git ignores secrets/credentials.yaml
-  ✓ .dockerignore covers secrets/ and .env
-  ✓ .cursorignore covers secrets/ and .env
-  ...
-  ✓ .claude/settings.json denies Read on secrets/
-==> Nothing sensitive tracked
-  ✓ .env not in the index
-  ✓ secrets/credentials.yaml not in the index
-  ✓ .env absent from history
-  ✓ secrets/credentials.yaml absent from history
-==> Committed template is value-free
-  ✓ credentials.example.yaml has no real values
+The audit checks:
 
-secrets audit passed
-```
+- Git ignore rules and tracking history
+- Docker build-context exclusions
+- repository ignore files for Claude Code, Cursor, JetBrains AI Assistant,
+  Gemini, Codeium/Windsurf, Aider, Continue, and Codex
+- that the committed example contains no real values
 
-The audit checks three separate things, because they fail independently:
+GitHub Copilot has no repository ignore file. Configure content exclusions in
+GitHub settings for `secrets/**`, `.env`, and `**/*.tfvars`; otherwise assume
+Copilot can access them.
 
-1. **Ignore rules exist** in all twelve mechanisms.
-2. **Nothing is tracked** — not in the index, and *not anywhere in git history*. A file can be correctly ignored today and still be sitting in a commit from last week.
-3. **The committed template is value-free** — the one file in `secrets/` that *is* committed must never gain a real value.
+## Operational cautions
 
-Run it before committing anything under `secrets/`.
-
----
-
-## Security posture
-
-!!! warning "`LITELLM_MASTER_KEY` is the crown jewel"
-    It fronts every provider key. Clients only ever see this one credential — which is the point of a gateway — but it means leaking it exposes **all** downstream spend, not just one provider.
-
-!!! warning "`VLLM_API_KEY` is not optional in practice"
-    The RunPod HTTP proxy is public by default. A pod started without `--api-key` is an **open GPU on the internet**. Always set it.
-
-!!! warning "Never open the security group to `0.0.0.0/0`"
-    The demo ports are unauthenticated by default and the stack holds live provider keys. Set `allowed_cidr` to your own IP as `<ip>/32`.
-
-**Prefer AWS IAM Identity Center** (`AWS_PROFILE` via `aws configure sso`) over static access keys. If SSO is available, leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` blank — Terraform uses the standard AWS credential chain. Static keys remain supported as an alternative for environments where SSO is unavailable, but both halves of the pair must be configured together.
-
-**Scope tool credentials tightly.** From Phase 2 an agent can call tools, and it holds whatever grants the credential has. A read-only ClickHouse Cloud user is the difference between an agent that can answer questions and one that can `DROP TABLE`.
-
----
+- Never pass a secret as a command argument or enable shell tracing around it.
+- Use `r` only when terminal scrollback exposure is acceptable.
+- Clear the clipboard after copying a credential.
+- `LITELLM_MASTER_KEY` fronts downstream provider access and spend; protect it
+  accordingly.
+- Set a `VLLM_API_KEY` before exposing a RunPod proxy.
+- Never use `0.0.0.0/0` for the planned AWS inbound CIDR.
+- Changing `.env` does not rotate accounts already persisted by databases or
+  object stores.
+- Preserve `LANGFUSE_ENCRYPTION_KEY`; losing it can make stored encrypted data
+  unreadable.
 
 ## If a credential leaks
 
-1. **Revoke first, at the provider.** Rotating the value in your file does nothing to a key that has already been pushed. Assume anything committed is compromised the moment it lands.
-2. Issue a replacement and run `./scripts/stack.sh secrets write`.
-3. *Only then* clean history (`git filter-repo`, or delete the repo if it is young).
-4. Note the rotation in `meta.last_reviewed`.
+1. Revoke it at the provider immediately.
+2. Issue a replacement and update the inventory.
+3. Run `./scripts/stack.sh secrets write`.
+4. Clean Git history only after revocation.
 
-!!! danger "History rewriting is not containment"
-    Forks, clones, CI caches, and GitHub's own unreachable-object storage can all retain the blob. Revocation is the control that actually works; rewriting history is cleanup.
+History rewriting is cleanup, not containment: forks, clones, and caches can
+retain the original value.

@@ -1,6 +1,8 @@
 # Configuration
 
-One declarative file describes **what** the stack is. A script decides **where** it runs.
+One declarative file describes **what** the stack is. The script resolves the
+selected target and profile. Only the Docker target is currently implemented;
+AWS and Kubernetes remain declarations of the intended interface.
 
 ```mermaid
 flowchart TB

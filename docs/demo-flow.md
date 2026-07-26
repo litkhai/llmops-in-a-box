@@ -32,7 +32,9 @@ Lead with the architecture, not the UI.
 
 **Talking points**
 
-- One `stack.yaml` describes the whole stack. The deployment target is a flag — the same file runs on a laptop and on EC2.
+- One `stack.yaml` describes the whole stack. Docker runs today; the EC2 target
+  is declared behind the same interface but its Terraform artifact is not yet
+  implemented.
 - **Layers are fixed; implementations are swappable.** vLLM → SGLang, RunPod → on-prem GPU, LibreChat → your own app.
 - The build-out is phased on purpose: Phase 1 proves the architecture with no GPU, so every later layer plugs into a tracing pipeline that already works.
 
@@ -81,21 +83,28 @@ Open Langfuse. Spend the most time here.
 
 **The framing that matters**
 
-> Observability lives at the gateway, so this is framework-neutral. Raw SDK, LangChain, LlamaIndex, or an MCP agent — all traced identically, all with zero application code changes.
+> Observability lives at the gateway, so clients using the same endpoint get a
+> consistent provider-level trace. Applications can still add business
+> metadata and deeper spans when they need them.
 
 ---
 
 ## 4. Close — why ClickHouse *(1 min)*
 
-> Langfuse v3 stores traces in **ClickHouse**. At production volume, LLM tracing is a high-cardinality, append-heavy, aggregate-on-read workload — thousands of traces per minute, each with unique IDs, arbitrary metadata, and queries that scan wide time ranges to compute p95 latency and cost per model.
+> Langfuse stores traces in **ClickHouse**. LLM tracing is a high-cardinality,
+> append-heavy, aggregate-on-read workload: unique request IDs, flexible
+> metadata, and time-range queries over latency, tokens, and cost.
 >
-> That is precisely the workload ClickHouse was built for. The same architecture you just saw on a laptop extends to millions of traces per day without changing shape.
+> That is the workload shape a column-oriented analytical database is designed
+> to serve.
 
 Then hand back to the phases: *this is Phase 1. The same config adds tools, self-hosted models, and caching without a rewrite.*
 
 ---
 
 ## Variation — from Phase 3
+
+This variation is planned; it is not part of the current runnable demo.
 
 Open with the serving layer instead, then follow the same arc:
 

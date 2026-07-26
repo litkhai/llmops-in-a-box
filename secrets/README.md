@@ -1,113 +1,74 @@
 # `secrets/`
 
-Everything in this directory is ignored **except** this file and
-`credentials.example.yaml`. Real credentials never enter git history, a Docker
-build context, or an AI coding tool's index.
+Only this file and `credentials.example.yaml` are committed. The real
+`credentials.yaml` and generated `.env` must stay private.
 
 ## Setup
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup --phase 1 # inside: d, provider keys, g, w
-./scripts/stack.sh secrets status --all    # values are never printed
-./scripts/stack.sh secrets validate --all  # offline format checks
-./scripts/stack.sh secrets write           # atomic .env write, mode 600
+./scripts/stack.sh secrets setup --phase 1
+# main menu: d → provider key(s) → g → w → q
+
+./scripts/stack.sh secrets status --phase 1
+./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh doctor
 ```
 
-`credentials.yaml` is the private source of truth. The setup hub handles
-external values, visible configuration, shared login defaults, and locally
-generated secrets with the appropriate input mode. `.env` is generated from it
-and is what LiteLLM, Langfuse, LibreChat, and Terraform actually read. Never
-hand-edit `.env`.
+`credentials.yaml` is the source of truth; `.env` is generated from it. Never
+edit `.env` manually.
 
-Main-menu shortcuts:
+The setup menu:
 
 | Key | Action |
 |:---:|---|
-| `d` | Set default ID/email/password credentials for compatible technologies |
-| `g` | Generate all missing internal values |
-| `w` | Validate and write `.env` |
+| `d` | Set compatible default ID, email, and password fields |
+| `g` | Generate missing internal values |
+| `w` | Validate and atomically write `.env` |
 | `q` | Finish |
 
-`DEFAULT_EMAIL` is prompted after choosing `d` when the current phase/filter
-contains an email target such as `LANGFUSE_INIT_USER_EMAIL`; it is not prompted
-just by opening the setup screen. Inside a credential, use `c` to copy, `r` to
-reveal, `e` to replace, `d` to delete, and `b` to return.
+Within a credential, use `c` to copy, `r` to reveal after a warning, `e` to
+replace, `d` to delete, and `b` to return. External input is hidden; generated
+values are not printed.
 
-```
-secrets/credentials.yaml  ──secrets write──►  .env  ──►  docker compose / terraform
-      (private, 0600)                   (generated, 0600)
-```
-
-Operate on one phase or one credential when needed:
+Focused commands remain available:
 
 ```bash
-./scripts/stack.sh secrets generate --phase 1
 ./scripts/stack.sh secrets set OPENAI_API_KEY
-./scripts/stack.sh secrets status --phase 1
-./scripts/stack.sh secrets validate --phase 1
+./scripts/stack.sh secrets generate --phase 1
+./scripts/stack.sh secrets write
 ```
 
-`secrets setup` is the unified setup hub. It groups the complete inventory by
-technology, hides external secret input, accepts visible configuration values,
-generates individual internal credentials, and offers `g` to generate every
-missing internal value. Use `d` to set a default ID, email, and password:
-LiteLLM receives the ID, Langfuse receives the email, and local databases and
-object stores receive the compatible account fields;
-cryptographic and external keys remain unique. This is a demo convenience;
-prefer unique service passwords in production. Use `w` in the same menu to
-write `.env`. The separate
-`secrets generate` and `secrets write` commands remain available for
-automation. Existing generated values are preserved unless `--force` is
-supplied to `secrets generate`. Configured values remain hidden by default;
-select an item and use `c` to copy it or `r` to reveal it after confirmation.
+See the published [Credentials](../docs/credentials.md) guide for the full
+inventory, default mappings, AWS SSO/static-key choices, and validation limits.
 
-## Verifying the ignore coverage
+## Verify ignore coverage
 
 ```bash
 ./scripts/stack.sh secrets audit
 ```
 
-This checks that `credentials.yaml` and `.env` are ignored by git, are absent
-from the index and from `HEAD`, and that every ignore file below still lists
-them. Run it before any commit that touches this directory.
+The audit verifies that private files are ignored by Git and Docker, absent
+from Git history, excluded by supported AI-tool ignore files, and that the
+committed example has no values.
 
-## Coverage
-
-| Tool | Mechanism | File |
-|---|---|---|
-| Git | ignore rules | `.gitignore` |
-| Docker | build-context exclusion | `.dockerignore` |
-| Claude Code | `permissions.deny` on `Read` | `.claude/settings.json` |
-| Cursor | ignore rules | `.cursorignore` |
-| JetBrains AI Assistant | ignore rules | `.aiignore` |
-| Gemini Code Assist | ignore rules | `.aiexclude`, `.geminiignore` |
-| Codeium / Windsurf | ignore rules | `.codeiumignore` |
-| Aider | ignore rules | `.aiderignore` |
-| Continue | ignore rules | `.continueignore` |
-| OpenAI Codex CLI | honours `.gitignore`; `.codexignore` as belt-and-braces | `.codexignore` |
-
-**GitHub Copilot is the exception** — it has no repo-level ignore file.
-Content exclusions are configured server-side, per repository or organisation,
-under *Settings → Copilot → Content exclusions*. Add `secrets/**`, `.env`, and
-`**/*.tfvars` there. Until you do, assume Copilot can see these files.
+GitHub Copilot content exclusions are configured in GitHub rather than in a
+repository file. Exclude `secrets/**`, `.env`, and `**/*.tfvars`; otherwise
+assume Copilot can access them.
 
 ## If a credential leaks
 
-1. **Revoke first, at the provider.** Rotating the value in this file does
-   nothing to a key already pushed — assume anything committed is compromised.
-2. Issue a replacement and run `./scripts/stack.sh secrets write`.
-3. Only then clean history (`git filter-repo`, or delete the repo if it is
-   young). History rewriting is not containment; revocation is.
-4. Note the rotation date in `meta.last_reviewed`.
+1. Revoke it at the provider.
+2. Issue and store a replacement.
+3. Run `./scripts/stack.sh secrets write`.
+4. Clean history only after revocation.
 
-## Notes
+History rewriting is cleanup, not containment.
 
-- `LITELLM_MASTER_KEY` fronts every provider key. It is the highest-value
-  secret here — leaking it exposes all downstream spend, not just one provider.
-- Prefer AWS IAM Identity Center (`AWS_PROFILE`) over static access keys.
-- `VLLM_API_KEY` is not optional in practice: the RunPod HTTP proxy is public
-  by default, so an unauthenticated pod is an open GPU on the internet.
-- Never set `AWS_ALLOWED_CIDR` to `0.0.0.0/0`. The demo ports are
-  unauthenticated by default and the stack holds live provider keys.
+## Cautions
+
+- Protect `LITELLM_MASTER_KEY`; it fronts downstream provider access.
+- Prefer AWS IAM Identity Center (`AWS_PROFILE`) to static keys.
+- Authenticate any public vLLM/RunPod endpoint.
+- Never expose the planned AWS target through `0.0.0.0/0`.
+- Use `r` only when terminal scrollback exposure is acceptable.

@@ -41,7 +41,7 @@ theme:
   features:
     - navigation.instant
     - navigation.instant.progress
-    # The nav is grouped into sections, so tabs show the four sections and the
+    # The nav is grouped into sections, so tabs show the sections and the
     # left sidebar shows the pages inside the active one. Those are different
     # lists, which is what stops the sidebar from being a second copy of the
     # tabs — the problem a flat nav had. Only index.md hides the sidebar, being
@@ -70,14 +70,16 @@ extra_css:
 
 nav:
   - Overview: index.md
+  - Start:
+      - Getting started: getting-started.md
+      - Credentials: credentials.md
+      - Phase 1 workshop: workshop.md
   - Understand:
       - Background: background.md
       - Build-out phases: phases.md
-  - Build:
-      - Workshop: workshop.md
       - Configuration: configuration.md
-      - Credentials: credentials.md
-      - Deployment: deployment.md
+  - Operate:
+      - Deployment targets: deployment.md
   - Present:
       - Demo flow: demo-flow.md
 

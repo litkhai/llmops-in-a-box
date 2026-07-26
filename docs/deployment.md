@@ -1,214 +1,144 @@
 # Deployment
 
-Two targets, one config. The target is a **flag**, not a fork in the config tree.
+`stack.yaml` declares multiple targets, but only the Docker target is
+implemented. This page describes current operations and keeps future targets
+clearly separated.
 
----
+For first-time machine and credential preparation, start with
+[Getting started](getting-started.md).
 
-## Prerequisites
+## Target status
 
-| Requirement | Notes |
-|---|---|
-| `yq` | mikefarah v4 — `brew install yq` |
-| Docker ≥ 24 + Compose v2 | Target `docker` |
-| Terraform ≥ 1.7 + AWS credentials | Target `aws-ec2` |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | At least one, for the models you want |
+| Target | Lifecycle | Status |
+|---|---|---|
+| `docker` | Docker Compose | **Runnable** |
+| `aws-ec2` | Terraform → EC2 → Compose | Declared; `terraform/` not implemented |
+| `k8s` | Helm | Planned and disabled |
 
-`scripts/stack.sh` targets bash 3.2, so macOS system bash works with no upgrade.
+## Docker
 
-```bash
-./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup --phase 1    # inside: d, provider keys, g, w
-./scripts/stack.sh secrets validate --phase 1
-./scripts/stack.sh doctor
-```
-
-`doctor` only checks the secrets the selected profile actually needs — in Phase 1 it stays quiet about RunPod and MCP credentials. Use `--all` to see every phase.
-
-```console
-$ ./scripts/stack.sh doctor
-==> Config
-  ✓ stack.yaml schema 1  project=sovereign-ai-stack  env=demo
-  ✓ target=docker  profile=phase-1
-==> Tooling
-  ✓ yq v4.53.3
-  ✓ docker 29.6.2
-  ✓ docker compose 5.3.1
-  ✓ docker daemon reachable
-==> Secrets  (.env, phases 1..1)
-  ✓ LITELLM_MASTER_KEY set
-  ✓ OPENAI_API_KEY set
-  ...
-```
-
-See [Credentials](credentials.md) for the full inventory.
-
----
-
-## Target 1 — Docker on a laptop
-
-Everything except GPU serving runs locally in one compose stack.
+Start the current Phase 1 profile:
 
 ```bash
 ./scripts/stack.sh up --target docker --profile phase-1
+./scripts/stack.sh status
 ```
 
-!!! tip "First time through? Use the workshop"
-    This page is the reference. The [Workshop](workshop.md) is the same ground as a guided run with a checkpoint after every step.
-
-| Service | URL | Notes |
-|---|---|---|
-| LibreChat | <http://localhost:3080> | Chat UI, model picker |
-| LiteLLM | <http://localhost:4000> | Unified gateway |
-| Langfuse | <http://localhost:3000> | Observability UI |
-| ClickHouse | `localhost:8123` | Langfuse trace store |
-| MinIO | <http://localhost:9001> | Blob store backing Langfuse |
-
-### First-time setup
-
-!!! tip "Prefer headless initialization — it makes this a single pass"
-    Langfuse can create the org, project, user and **key pair** on first boot from `LANGFUSE_INIT_*` variables, so you choose the keys instead of fetching them and the gateway comes up with tracing already working. See [Credentials](credentials.md#kind-3-langfuse-keys-initialized-with-the-demo) and Langfuse's [Headless Initialization](https://langfuse.com/self-hosting/administration/headless-initialization) guide.
-
-The manual route, if you are not using headless init:
-
-1. Open Langfuse → create an org and project → copy the public and secret keys.
-2. Store them with `./scripts/stack.sh secrets set LANGFUSE_PUBLIC_KEY` and
-   `./scripts/stack.sh secrets set LANGFUSE_SECRET_KEY`, then run
-   `./scripts/stack.sh secrets write`.
-3. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys.
-4. Verify: `./scripts/stack.sh status`
-
-Step 3 is not optional: LiteLLM reads the Langfuse keys at startup, so a gateway that booted before the keys existed will run fine and trace nothing.
-
-```console
-$ ./scripts/stack.sh status
-==> Health  host=localhost
-  ✓ litellm      200  http://localhost:4000/health/liveliness
-  ✓ langfuse     200  http://localhost:3000/api/public/health
-  ✓ librechat    200  http://localhost:3080/health
-  ✓ clickhouse   200  http://localhost:8123/ping
-```
-
-With nothing running — which is the state today — the same command returns `✗ 000` for every row. That is `curl` failing to connect, not a health check reporting unhealthy.
+Useful operations:
 
 ```bash
-./scripts/stack.sh urls        # just print the endpoints, no requests
+./scripts/stack.sh urls
+./scripts/stack.sh logs
+./scripts/stack.sh config
+./scripts/stack.sh models
+./scripts/stack.sh down
 ```
 
-Open Langfuse — you should see traces for `gpt-4o` and `claude-sonnet` in one project.
+`status` checks only the active profile. `urls` prints endpoints without making
+requests.
 
-!!! tip "Health checks follow the profile"
-    `status` only checks layers the active profile brought up. It won't report a missing vLLM pod in Phase 1.
+### Published ports
 
----
+| Service | Default |
+|---|---|
+| Langfuse | `3000` |
+| LibreChat | `3080` |
+| LiteLLM | `4000` |
+| ClickHouse HTTP | `8123` |
+| MinIO console | `9001` |
+| MinIO API | `9002` |
 
-## Target 2 — AWS EC2 with Terraform
-
-Provisions a single EC2 instance (default `t3.xlarge`, gp3 volume), security groups, and an Elastic IP, then bootstraps the same compose stack via cloud-init.
+Ports can be remapped for one invocation:
 
 ```bash
-./scripts/stack.sh up --target aws-ec2 \
-  --tf-var key_name=<your-keypair> \
-  --tf-var allowed_cidr=<your-ip>/32
+LANGFUSE_PORT=3100 CLICKHOUSE_HTTP_PORT=8124 ./scripts/stack.sh up
 ```
 
-Instance type, volume size, and region come from `targets.aws-ec2.vars` in `stack.yaml`; `--tf-var` overrides or adds. The host for `status` and `urls` is read from the `public_ip` Terraform output, so **no IP is ever hard-coded**.
+Postgres, Redis, MongoDB, ClickHouse's native protocol, and the Langfuse worker
+are not published to the host.
 
-!!! danger "Do not open to `0.0.0.0/0`"
-    The security group restricts inbound to `allowed_cidr`. These ports are unauthenticated by default and the stack holds live provider API keys.
-
-### Production hardening
-
-- ALB + ACM certificate in front
-- Postgres → RDS
-- ClickHouse → ClickHouse Cloud
-- Secrets → SSM Parameter Store
-
-### Teardown
+### Data and teardown
 
 ```bash
-./scripts/stack.sh down --target aws-ec2
+./scripts/stack.sh down          # stop containers, keep volumes
+./scripts/stack.sh down --purge  # also delete volumes
 ```
 
-From Phase 3 on, RunPod pods are billed separately — stop them in the RunPod console.
+`--purge` permanently removes local stack data. Use it only for a disposable
+environment.
 
----
+Service credentials initialized into a persistent database or object-store
+volume do not rotate merely because `.env` changes. Rotate the account inside
+the service or recreate disposable volumes.
 
-## Phase 3 — vLLM on RunPod
+## AWS EC2
 
-Not required to run the stack today. See [Build-out phases](phases.md#phase-3-self-hosted-serving).
-
-Deploy via RunPod's **vLLM Quick Deploy template** (recommended) or manually on any GPU pod:
+The intended target is a single EC2 instance bootstrapped with the same Compose
+stack. Its target metadata and credential fields exist in `stack.yaml`, but
+there is no `terraform/` implementation yet. Consequently:
 
 ```bash
-# on the pod — 1× A40 / L40S is enough for a 7B model
-pip install vllm
-vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000 --api-key ${VLLM_API_KEY}
+./scripts/stack.sh up --target aws-ec2
 ```
 
-Expose port 8000 through RunPod's HTTP proxy and record the endpoint — **note the `/v1` suffix**:
+exits with an implementation error; it does not provision AWS resources.
 
-```
-https://<pod-id>-8000.proxy.runpod.net/v1
-```
+The planned authentication paths are:
 
-Put it in `secrets/credentials.yaml` as `VLLM_API_BASE`, then:
+- IAM Identity Center through `AWS_PROFILE` (preferred)
+- a scoped static access-key pair where SSO is unavailable
 
-```bash
-./scripts/stack.sh secrets write
-./scripts/stack.sh up --profile phase-3
-```
+The planned target will also require a narrow inbound CIDR. Never expose a demo
+stack holding provider keys through `0.0.0.0/0`.
 
-!!! warning "Always set `--api-key`"
-    The RunPod HTTP proxy is public by default. A pod without an API key is an open GPU on the internet.
+## External vLLM serving
 
----
+Phase 3 is planned and is not required for the current demo. The design treats
+vLLM as an externally managed OpenAI-compatible endpoint rather than a local
+Compose service. When implemented, it will require:
 
-## Client code
+- a live `VLLM_API_BASE` ending in `/v1`
+- a `VLLM_API_KEY`
+- a running GPU endpoint, initially expected on RunPod
 
-Identical for every model, in every phase:
+Do not expose a vLLM endpoint without authentication; a public unauthenticated
+GPU endpoint can be used by anyone.
+
+## Client endpoint
+
+Every model is called through LiteLLM:
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:4000", api_key="sk-litellm-master")
+client = OpenAI(
+    base_url="http://localhost:4000",
+    api_key="<LITELLM_MASTER_KEY>",
+)
 
-for m in ["gpt-4o", "claude-sonnet"]:          # add "qwen-7b" from Phase 3
-    r = client.chat.completions.create(
-        model=m,
-        messages=[{"role": "user", "content": "Explain ClickHouse in one sentence."}],
-    )
-    print(m, "→", r.choices[0].message.content)
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello"}],
+)
 ```
 
-That is the whole point of the gateway: swapping `gpt-4o` for a self-hosted `qwen-7b` changes one string, and the trace still lands in the same Langfuse project with the same shape.
-
----
+Changing provider or serving implementation changes the model alias and
+gateway configuration, not the client protocol.
 
 ## Troubleshooting
 
-??? question "`Bind for 127.0.0.1:3000 failed: port is already allocated`"
-    Something else on the machine holds the port. Every published port is overridable:
-
-    ```bash
-    LANGFUSE_PORT=3100 CLICKHOUSE_HTTP_PORT=8124 ./scripts/stack.sh up
-    ```
-
-    Postgres, Redis, ClickHouse's native port and the Langfuse worker are not published at all — they are reachable only inside the compose network.
-
 ??? question "`yq not found`"
-    `brew install yq`. The script requires [mikefarah/yq](https://github.com/mikefarah/yq) v4 specifically and refuses other implementations — the Python `yq` has incompatible syntax.
+    Install mikefarah/yq v4. Other programs named `yq` use incompatible
+    syntax.
 
 ??? question "A model appears in the picker but requests fail"
-    Its API key is unset. `render` warns about this rather than silently dropping the model:
+    The catalog is rendered independently of provider-key liveness. Run
+    `./scripts/stack.sh doctor` and verify the selected provider credential.
 
-    ```
-    ! model 'gpt-4o' selected but $OPENAI_API_KEY is not set — requests to it will fail
-    ```
+??? question "Traces are missing"
+    LiteLLM reads Langfuse keys at startup. Validate the credentials, then run
+    `./scripts/stack.sh up` again to reload them.
 
-    Run `./scripts/stack.sh doctor` to see every gap at once.
-
-??? question "Traces are not appearing in Langfuse"
-    LiteLLM reads the Langfuse keys at startup. After adding them, restart the gateway — `./scripts/stack.sh up` does this. Confirm `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are both set with `doctor`.
-
-??? question "`target 'k8s' is declared but not implemented yet`"
-    Expected. `targets.k8s` is reserved in the schema with `enabled: false` so the shape is stable; the Helm profile is on the roadmap.
+??? question "The AWS or Kubernetes target refuses to start"
+    Expected in the current repository. Those targets are declarations of the
+    intended interface, not completed deployment artifacts.
