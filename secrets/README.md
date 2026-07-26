@@ -7,26 +7,35 @@ build context, or an AI coding tool's index.
 ## Setup
 
 ```bash
-cp secrets/credentials.example.yaml secrets/credentials.yaml
-$EDITOR secrets/credentials.yaml          # fill in the `value:` fields
-./scripts/stack.sh secrets write          # generate .env from it
-./scripts/stack.sh doctor                 # verify the stack sees them
+./scripts/stack.sh secrets init
+./scripts/stack.sh secrets setup           # choose Phase 1..5
+./scripts/stack.sh secrets status --all    # values are never printed
+./scripts/stack.sh secrets validate --all  # offline format checks
+./scripts/stack.sh secrets write           # atomic .env write, mode 600
+./scripts/stack.sh doctor
 ```
 
-`credentials.yaml` is the **single human-editable source** for credentials.
-`.env` is generated from it and is what LiteLLM, Langfuse, LibreChat, and
-Terraform actually read — never hand-edit `.env`, it gets overwritten.
+`credentials.yaml` is the private source of truth. The wizard updates it with
+hidden input; `.env` is generated from it and is what LiteLLM, Langfuse,
+LibreChat, and Terraform actually read. Never hand-edit `.env`.
 
 ```
 secrets/credentials.yaml  ──secrets write──►  .env  ──►  docker compose / terraform
-      (you edit this)                     (generated)
+      (private, 0600)                   (generated, 0600)
 ```
 
-Generate any self-generated value with the command in its `generate:` field:
+Operate on one phase or one credential when needed:
 
 ```bash
-./scripts/stack.sh secrets gen             # print a value for every generate: field
+./scripts/stack.sh secrets generate --phase 1
+./scripts/stack.sh secrets set OPENAI_API_KEY
+./scripts/stack.sh secrets status --phase 1
+./scripts/stack.sh secrets validate --phase 1
 ```
+
+Generated values are stored without being printed and existing values are
+preserved unless `--force` is explicit. Entered values are validated before
+they are stored. Phase 5 currently has no dedicated credentials.
 
 ## Verifying the ignore coverage
 

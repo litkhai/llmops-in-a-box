@@ -247,11 +247,11 @@ Layer dependencies resolve transitively — asking for a layer brings up what it
 
 ## Credentials
 
-Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse Cloud, Langfuse, MinIO — is inventoried in **one** file: `secrets/credentials.yaml`. It is the only file you hand-edit; `.env` is generated from it.
+Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse Cloud, Langfuse, MinIO — is inventoried in **one** private file: `secrets/credentials.yaml`. The phase-aware wizard updates it with hidden input; `.env` is generated from it.
 
 ```
 secrets/credentials.yaml  ──secrets write──►  .env  ──►  compose / terraform
-      (you edit this)                     (generated, 0600)
+      (private, 0600)                   (generated, 0600)
 ```
 
 Each entry records more than the value — the console URL to get it, the scopes it needs, the owner, and a rotation cadence:
@@ -270,9 +270,11 @@ Each entry records more than the value — the console URL to get it, the scopes
 ```
 
 ```bash
-./scripts/stack.sh secrets gen      # generate values for self-generated keys
-./scripts/stack.sh secrets write    # credentials.yaml -> .env (mode 600)
-./scripts/stack.sh secrets audit    # verify nothing can leak
+./scripts/stack.sh secrets setup           # select Phase 1..5
+./scripts/stack.sh secrets status --all    # no values printed
+./scripts/stack.sh secrets validate --all  # offline format checks
+./scripts/stack.sh secrets write           # credentials.yaml -> .env
+./scripts/stack.sh secrets audit           # verify nothing can leak
 ```
 
 ### Ignore coverage
@@ -311,9 +313,8 @@ If a credential does leak, **revoke at the provider first** — rewriting histor
 `scripts/stack.sh` targets bash 3.2, so macOS system bash works with no upgrade.
 
 ```bash
-cp secrets/credentials.example.yaml secrets/credentials.yaml
-./scripts/stack.sh secrets gen            # values for the self-generated keys
-$EDITOR secrets/credentials.yaml          # paste those + your provider keys
+./scripts/stack.sh secrets init
+./scripts/stack.sh secrets setup          # choose Phase 1..5
 ./scripts/stack.sh secrets write          # generate .env (mode 600)
 ./scripts/stack.sh doctor
 ```
@@ -513,7 +514,7 @@ Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phas
 
 **Can I hand-edit the rendered configs?** No — `render` overwrites them, and `up` renders by default. Edit `stack.yaml` instead. Use `--no-render` if you need a one-off manual override.
 
-**Where do API keys live?** One file — `secrets/credentials.yaml`, generated from `secrets/credentials.example.yaml`. `.env` is derived from it via `./scripts/stack.sh secrets write` and should never be hand-edited. Both are ignored by git, Docker, and every AI coding tool listed under [Credentials](#credentials); `secrets audit` proves it.
+**Where do API keys live?** One file — `secrets/credentials.yaml`, created by `secrets init` and safely updated by the phase-aware `secrets setup` wizard. `.env` is derived from it via `./scripts/stack.sh secrets write` and should never be hand-edited. Both are ignored by git, Docker, and every AI coding tool listed under [Credentials](#credentials); `secrets audit` proves it.
 
 **Can I self-host Langfuse fully air-gapped?** Yes — the compose stack has no external dependencies beyond the model endpoints you configure. `--profile airgapped` drops the commercial API models entirely.
 

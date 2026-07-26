@@ -25,6 +25,9 @@ DO_RENDER=1
 PURGE=0
 SHOW_ALL=0
 TF_VARS=""   # newline-separated key=value
+SECRETS_PHASE=""
+SECRETS_ONLY=""
+SECRETS_FORCE=0
 
 # ── output ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -155,13 +158,43 @@ profile_max_phase() {
 }
 
 load_env() {
-  local f
+  local f cf count i env val line key
   f="$REPO_ROOT/$(qs '.secrets.file')"
+  cf="$REPO_ROOT/secrets/credentials.yaml"
+
+  # Prefer the structured credential store. `export "$name=$value"` assigns a
+  # literal value; unlike sourcing .env it cannot execute shell syntax embedded
+  # in a credential.
+  if [ -f "$cf" ]; then
+    count="$(yq '.credentials | length' "$cf")"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      env="$(yq -r ".credentials[$i].env // \"\"" "$cf")"
+      val="$(yq -r ".credentials[$i].value // \"\"" "$cf")"
+      i=$((i + 1))
+      case "$env" in
+        ''|*[!A-Z0-9_]*) continue ;;
+      esac
+      export "$env=$val"
+    done
+    return 0
+  fi
+
+  # Backward-compatible reader for an existing .env. This deliberately does
+  # not use `source` or `eval`; only NAME=VALUE records are accepted.
   [ -f "$f" ] || return 0
-  set -a
-  # shellcheck disable=SC1090
-  . "$f"
-  set +a
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"
+    [ "$key" != "$line" ] || continue
+    case "$key" in ''|*[!A-Z0-9_]*) continue ;; esac
+    val="${line#*=}"
+    case "$val" in
+      \'*\') val="${val#\'}"; val="${val%\'}" ;;
+      \"*\") val="${val#\"}"; val="${val%\"}" ;;
+    esac
+    export "$key=$val"
+  done < "$f"
 }
 
 target_host() {
@@ -419,30 +452,436 @@ cmd_config() {
 # ═════════════════════════════════════════════════════════════════════════════
 CRED_FILE_REL="secrets/credentials.yaml"
 CRED_FILE="$REPO_ROOT/$CRED_FILE_REL"
+CRED_TEMPLATE_REL="secrets/credentials.example.yaml"
+CRED_TEMPLATE="$REPO_ROOT/$CRED_TEMPLATE_REL"
 
 cq() { local v; v="$(yq "$1" "$CRED_FILE")"; [ "$v" = "null" ] && v=""; printf '%s' "$v"; }
 
 require_credentials() {
   [ -f "$CRED_FILE" ] || die "$CRED_FILE_REL not found.
-  cp secrets/credentials.example.yaml $CRED_FILE_REL && \$EDITOR $CRED_FILE_REL"
+  Run: ./scripts/stack.sh secrets init"
+  [ ! -L "$CRED_FILE" ] || die "$CRED_FILE_REL must not be a symlink"
+}
+
+credential_read_file() {
+  if [ -f "$CRED_FILE" ]; then printf '%s' "$CRED_FILE"
+  else printf '%s' "$CRED_TEMPLATE"; fi
+}
+
+cmd_secrets_init() {
+  [ -f "$CRED_TEMPLATE" ] || die "credential template not found: $CRED_TEMPLATE_REL"
+  [ ! -L "$CRED_FILE" ] || die "$CRED_FILE_REL must not be a symlink"
+  if [ -f "$CRED_FILE" ]; then
+    chmod 600 "$CRED_FILE"
+    ok "$CRED_FILE_REL already exists (mode 600 enforced)"
+    return 0
+  fi
+
+  umask 077
+  cp "$CRED_TEMPLATE" "$CRED_FILE"
+  chmod 600 "$CRED_FILE"
+  ok "created $CRED_FILE_REL (mode 600)"
+  say "${C_DIM}next:${C_RST} ./scripts/stack.sh secrets setup"
+}
+
+validate_phase() {
+  case "$1" in 1|2|3|4|5) return 0 ;; *) return 1 ;; esac
+}
+
+select_secrets_phase() {
+  local p n name f
+  if [ -n "$SECRETS_PHASE" ]; then
+    validate_phase "$SECRETS_PHASE" || die "--phase must be 1, 2, 3, 4, or 5"
+    return 0
+  fi
+  [ "$SHOW_ALL" -eq 0 ] || return 0
+  if [ -n "$SECRETS_ONLY" ]; then
+    f="$(credential_read_file)"
+    SECRETS_PHASE="$(yq -r ".credentials[] | select(.env == \"$SECRETS_ONLY\") | .phase" "$f")"
+    [ -n "$SECRETS_PHASE" ] || die "unknown credential '$SECRETS_ONLY'"
+    validate_phase "$SECRETS_PHASE" || die "$SECRETS_ONLY has an invalid phase"
+    return 0
+  fi
+  [ -t 0 ] || die "select a phase with --phase 1..5 (or use --all)"
+
+  say "${C_B}credential phases${C_RST}"
+  for p in 1 2 3 4 5; do
+    name="$(qs ".phases.\"$p\".name")"
+    [ -n "$name" ] || name="Phase $p"
+    n="$(yq "[.credentials[] | select(.phase == $p)] | length" "$CRED_TEMPLATE")"
+    printf '  %s) %-28s %s credentials\n' "$p" "$name" "$n"
+  done
+  printf 'Select phase [1-5]: ' >&2
+  IFS= read -r SECRETS_PHASE
+  validate_phase "$SECRETS_PHASE" || die "invalid phase '$SECRETS_PHASE'"
+}
+
+credential_in_scope() {
+  local phase="$1"
+  [ "$SHOW_ALL" -eq 1 ] && return 0
+  [ -z "$SECRETS_PHASE" ] && return 0
+  [ "$phase" = "$SECRETS_PHASE" ]
+}
+
+credential_generator_id() {
+  # Accept the original exact commands for existing private inventories, but
+  # never eval them. New templates use the stable IDs on the left.
+  case "$1" in
+    sk-hex-24|"openssl rand -hex 24 | sed 's/^/sk-/'") printf 'sk-hex-24' ;;
+    hex-32|"openssl rand -hex 32")                     printf 'hex-32' ;;
+    base64-32|"openssl rand -base64 32")               printf 'base64-32' ;;
+    hex-16|"openssl rand -hex 16")                     printf 'hex-16' ;;
+    hex-24|"openssl rand -hex 24")                     printf 'hex-24' ;;
+    identifier-12)                                     printf 'identifier-12' ;;
+    '')                                                return 1 ;;
+    *)                                                 return 2 ;;
+  esac
+}
+
+generate_credential_value() {
+  local id="$1" r
+  GENERATED_VALUE=""
+  command -v openssl >/dev/null 2>&1 || {
+    VALIDATION_MESSAGE="openssl is required for local generation"
+    return 1
+  }
+  case "$id" in
+    sk-hex-24)    r="$(openssl rand -hex 24)" && GENERATED_VALUE="sk-$r" ;;
+    hex-32)       GENERATED_VALUE="$(openssl rand -hex 32)" ;;
+    base64-32)    GENERATED_VALUE="$(openssl rand -base64 32 | tr -d '\r\n')" ;;
+    hex-16)       GENERATED_VALUE="$(openssl rand -hex 16)" ;;
+    hex-24)       GENERATED_VALUE="$(openssl rand -hex 24)" ;;
+    identifier-12) r="$(openssl rand -hex 6)" && GENERATED_VALUE="minio-$r" ;;
+    *) VALIDATION_MESSAGE="unsupported generator '$id'"; return 1 ;;
+  esac
+  [ -n "$GENERATED_VALUE" ]
+}
+
+validate_credential_value() {
+  local env="$1" val="$2" prefix ip a b c d extra octet
+  VALIDATION_MESSAGE=""
+  if [ -z "$val" ]; then VALIDATION_MESSAGE="missing"; return 2; fi
+  case "$val" in
+    *$'\n'*|*$'\r'*) VALIDATION_MESSAGE="must be a single line"; return 1 ;;
+  esac
+  case "$env" in
+    OPENAI_API_KEY|ANTHROPIC_API_KEY|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|\
+    RUNPOD_API_KEY|VLLM_API_KEY|HF_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)
+      case "$val" in *[[:space:]]*) VALIDATION_MESSAGE="must not contain whitespace"; return 1 ;; esac ;;
+  esac
+
+  case "$env" in
+    OPENAI_API_KEY)
+      case "$val" in sk-?*) [ "${#val}" -ge 20 ] || { VALIDATION_MESSAGE="expected an OpenAI sk- key"; return 1; } ;;
+        *) VALIDATION_MESSAGE="expected prefix sk-"; return 1 ;; esac ;;
+    ANTHROPIC_API_KEY)
+      case "$val" in sk-ant-?*) [ "${#val}" -ge 20 ] \
+        || { VALIDATION_MESSAGE="expected an Anthropic sk-ant- key"; return 1; } ;;
+        *) VALIDATION_MESSAGE="expected prefix sk-ant-"; return 1 ;; esac ;;
+    LITELLM_MASTER_KEY)
+      case "$val" in sk-?*) [ "${#val}" -ge 20 ] || { VALIDATION_MESSAGE="must be at least 20 characters"; return 1; } ;;
+        *) VALIDATION_MESSAGE="expected prefix sk-"; return 1 ;; esac ;;
+    LITELLM_SALT_KEY)
+      [ "${#val}" -ge 32 ] || { VALIDATION_MESSAGE="must be at least 32 characters"; return 1; } ;;
+    LANGFUSE_PUBLIC_KEY)
+      case "$val" in pk-lf-?*) [ "${#val}" -ge 12 ] \
+        || { VALIDATION_MESSAGE="expected a Langfuse public key"; return 1; } ;;
+        *) VALIDATION_MESSAGE="expected prefix pk-lf-"; return 1 ;; esac ;;
+    LANGFUSE_SECRET_KEY)
+      case "$val" in sk-lf-?*) [ "${#val}" -ge 12 ] \
+        || { VALIDATION_MESSAGE="expected a Langfuse secret key"; return 1; } ;;
+        *) VALIDATION_MESSAGE="expected prefix sk-lf-"; return 1 ;; esac ;;
+    VLLM_API_BASE)
+      case "$val" in http://*/v1|https://*/v1) : ;; *) VALIDATION_MESSAGE="expected an http(s) URL ending in /v1"; return 1 ;; esac ;;
+    MCP_CLICKHOUSE_URL)
+      case "$val" in http://*|https://*) : ;; *) VALIDATION_MESSAGE="expected an http(s) URL"; return 1 ;; esac ;;
+    CLICKHOUSE_CLOUD_HOST)
+      case "$val" in *://*|*/*|*[[:space:]]*) VALIDATION_MESSAGE="expected a hostname without scheme or path"; return 1 ;; esac ;;
+    AWS_ACCESS_KEY_ID)
+      case "$val" in AKIA????????????????|ASIA????????????????) : ;;
+        *) VALIDATION_MESSAGE="expected a 20-character AKIA/ASIA access key ID"; return 1 ;; esac ;;
+    AWS_SECRET_ACCESS_KEY)
+      [ "${#val}" -ge 40 ] || { VALIDATION_MESSAGE="expected at least 40 characters"; return 1; } ;;
+    AWS_REGION)
+      case "$val" in [a-z][a-z]-[a-z0-9-]*-[0-9]) : ;; *) VALIDATION_MESSAGE="expected a region such as ap-northeast-2"; return 1 ;; esac ;;
+    AWS_ALLOWED_CIDR)
+      [ "$val" != "0.0.0.0/0" ] || { VALIDATION_MESSAGE="0.0.0.0/0 is forbidden"; return 1; }
+      case "$val" in
+        [0-9]*.[0-9]*.[0-9]*.[0-9]*/[0-9]*)
+          prefix="${val##*/}"; ip="${val%/*}" ;;
+        *) VALIDATION_MESSAGE="expected IPv4 CIDR, preferably your-ip/32"; return 1 ;;
+      esac
+      case "$prefix" in ''|*[!0-9]*) VALIDATION_MESSAGE="CIDR prefix must be numeric"; return 1 ;; esac
+      [ "$prefix" -ge 0 ] 2>/dev/null && [ "$prefix" -le 32 ] 2>/dev/null \
+        || { VALIDATION_MESSAGE="CIDR prefix must be 0..32"; return 1; }
+      IFS=. read -r a b c d extra <<< "$ip"
+      [ -z "$extra" ] || { VALIDATION_MESSAGE="expected exactly four IPv4 octets"; return 1; }
+      for octet in "$a" "$b" "$c" "$d"; do
+        case "$octet" in ''|*[!0-9]*) VALIDATION_MESSAGE="IPv4 octets must be numeric"; return 1 ;; esac
+        [ "$octet" -le 255 ] 2>/dev/null \
+          || { VALIDATION_MESSAGE="IPv4 octets must be 0..255"; return 1; }
+      done ;;
+    MINIO_ROOT_PASSWORD|ARTIFACT_MINIO_ROOT_PASSWORD|LANGFUSE_INIT_USER_PASSWORD)
+      [ "${#val}" -ge 8 ] || { VALIDATION_MESSAGE="must be at least 8 characters"; return 1; } ;;
+    MINIO_ROOT_USER|ARTIFACT_MINIO_ROOT_USER|CLICKHOUSE_CLOUD_USER)
+      case "$val" in *[[:space:]]*) VALIDATION_MESSAGE="must not contain whitespace"; return 1 ;; esac ;;
+  esac
+  VALIDATION_MESSAGE="valid format"
+  return 0
+}
+
+persist_credential_value() {
+  local env="$1" val="$2" dir tmp
+  require_credentials
+  case "$env" in ''|*[!A-Z0-9_]*) die "invalid credential env name '$env'" ;; esac
+  yq -e ".credentials[] | select(.env == \"$env\")" "$CRED_FILE" >/dev/null \
+    || die "credential '$env' is not in $CRED_FILE_REL"
+
+  dir="$(dirname "$CRED_FILE")"
+  umask 077
+  tmp="$(mktemp "$dir/.credentials.XXXXXX")"
+  cp "$CRED_FILE" "$tmp"
+  chmod 600 "$tmp"
+  SECRET_INPUT_VALUE="$val"
+  export SECRET_INPUT_VALUE
+  if ! yq -i "(.credentials[] | select(.env == \"$env\") | .value) = strenv(SECRET_INPUT_VALUE)" "$tmp"; then
+    unset SECRET_INPUT_VALUE val
+    rm -f "$tmp"
+    die "failed to update $env"
+  fi
+  unset SECRET_INPUT_VALUE val
+  mv "$tmp" "$CRED_FILE"
+  chmod 600 "$CRED_FILE"
+}
+
+credential_status_word() {
+  local env="$1" val="$2"
+  if [ -z "$val" ]; then printf '%smissing%s' "$C_YEL" "$C_RST"; return; fi
+  if validate_credential_value "$env" "$val"; then printf '%sset%s' "$C_GRN" "$C_RST"
+  else printf '%sinvalid%s' "$C_RED" "$C_RST"; fi
+}
+
+cmd_secrets_status() {
+  local f count i env name phase val status any=0
+  [ -z "$SECRETS_PHASE" ] || validate_phase "$SECRETS_PHASE" \
+    || die "--phase must be 1, 2, 3, 4, or 5"
+  f="$(credential_read_file)"
+  [ -f "$CRED_FILE" ] || warn "$CRED_FILE_REL not initialized — showing template state"
+  info "Credential status  ${C_DIM}${SECRETS_PHASE:+phase=$SECRETS_PHASE}${C_RST}"
+  printf '  %-4s %-34s %-10s %s\n' PHASE ENV STATUS NAME
+  count="$(yq '.credentials | length' "$f")"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="$(yq -r ".credentials[$i].env // \"\"" "$f")"
+    name="$(yq -r ".credentials[$i].name // \"\"" "$f")"
+    phase="$(yq -r ".credentials[$i].phase // \"\"" "$f")"
+    val="$(yq -r ".credentials[$i].value // \"\"" "$f")"
+    i=$((i + 1))
+    credential_in_scope "$phase" || continue
+    [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    status="$(credential_status_word "$env" "$val")"
+    printf '  %-4s %-34s %-10s %s\n' "$phase" "$env" "$status" "$name"
+    any=1
+  done
+  if [ "$any" -eq 0 ]; then
+    if [ -n "$SECRETS_PHASE" ]; then ok "Phase $SECRETS_PHASE requires no dedicated credentials"
+    else warn "no credentials matched the selection"; fi
+  fi
+}
+
+cmd_secrets_validate() {
+  local f count i env name phase val any=0 fail=0
+  [ -z "$SECRETS_PHASE" ] || validate_phase "$SECRETS_PHASE" \
+    || die "--phase must be 1, 2, 3, 4, or 5"
+  f="$(credential_read_file)"
+  info "Credential validation  ${C_DIM}(offline format checks; values are never printed)${C_RST}"
+  count="$(yq '.credentials | length' "$f")"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="$(yq -r ".credentials[$i].env // \"\"" "$f")"
+    name="$(yq -r ".credentials[$i].name // \"\"" "$f")"
+    phase="$(yq -r ".credentials[$i].phase // \"\"" "$f")"
+    val="$(yq -r ".credentials[$i].value // \"\"" "$f")"
+    i=$((i + 1))
+    credential_in_scope "$phase" || continue
+    [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    any=1
+    if validate_credential_value "$env" "$val"; then ok "$(printf '%-34s' "$env") $VALIDATION_MESSAGE"
+    else
+      case "$?" in
+        2) warn "$(printf '%-34s' "$env") missing" ;;
+        *) bad "$(printf '%-34s' "$env") $VALIDATION_MESSAGE"; fail=1 ;;
+      esac
+    fi
+  done
+  [ "$any" -eq 1 ] || ok "selected phase requires no dedicated credentials"
+  [ "$fail" -eq 0 ] || die "credential validation failed"
+}
+
+prompt_secret_value() {
+  local env="$1" val had_x=0
+  [ -t 0 ] || die "secret input requires an interactive terminal"
+  case "$-" in *x*) had_x=1; set +x ;; esac
+  printf 'Enter %s (input hidden): ' "$env" >&2
+  IFS= read -r -s val
+  printf '\n' >&2
+  PROMPTED_SECRET_VALUE="$val"
+  [ "$had_x" -eq 0 ] || set +x
+}
+
+cmd_secrets_set() {
+  local env="$SECRETS_ONLY" val
+  require_credentials
+  [ -n "$env" ] || die "usage: ./scripts/stack.sh secrets set <ENV_NAME>"
+  case "$env" in *[!A-Z0-9_]*) die "invalid credential name '$env'" ;; esac
+  yq -e ".credentials[] | select(.env == \"$env\")" "$CRED_FILE" >/dev/null \
+    || die "unknown credential '$env'"
+  prompt_secret_value "$env"
+  val="$PROMPTED_SECRET_VALUE"; unset PROMPTED_SECRET_VALUE
+  if ! validate_credential_value "$env" "$val"; then
+    unset val
+    die "$env rejected: $VALIDATION_MESSAGE"
+  fi
+  persist_credential_value "$env" "$val"
+  unset val
+  ok "$env stored and validated"
+}
+
+cmd_secrets_generate() {
+  local count i env phase val gen id any=0 changed=0
+  require_credentials
+  select_secrets_phase
+  count="$(cq '.credentials | length')"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="$(cq ".credentials[$i].env")"
+    phase="$(cq ".credentials[$i].phase")"
+    val="$(cq ".credentials[$i].value")"
+    gen="$(cq ".credentials[$i].generate")"
+    i=$((i + 1))
+    credential_in_scope "$phase" || continue
+    [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    [ -n "$gen" ] || continue
+    any=1
+    if [ -n "$val" ] && [ "$SECRETS_FORCE" -eq 0 ]; then
+      ok "$(printf '%-34s' "$env") already set — kept"
+      continue
+    fi
+    id="$(credential_generator_id "$gen")" || die "$env has an unsupported generator"
+    generate_credential_value "$id" || die "$env generation failed: $VALIDATION_MESSAGE"
+    validate_credential_value "$env" "$GENERATED_VALUE" \
+      || die "$env generator produced an invalid value: $VALIDATION_MESSAGE"
+    persist_credential_value "$env" "$GENERATED_VALUE"
+    unset GENERATED_VALUE val
+    ok "$(printf '%-34s' "$env") generated and stored"
+    changed=$((changed + 1))
+  done
+  [ "$any" -eq 1 ] || ok "selected phase has no locally generated credentials"
+  say "${C_DIM}$changed credential(s) generated; no values were printed${C_RST}"
+}
+
+cmd_secrets_setup() {
+  local count i env name phase val gen console status action retry id any=0
+  cmd_secrets_init >/dev/null
+  select_secrets_phase
+  require_credentials
+  info "Interactive credential setup  ${C_DIM}phase=$SECRETS_PHASE${C_RST}"
+  say "${C_DIM}Values are hidden. Existing values are kept unless you explicitly replace or clear them.${C_RST}"
+  count="$(cq '.credentials | length')"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="$(cq ".credentials[$i].env")"
+    name="$(cq ".credentials[$i].name")"
+    phase="$(cq ".credentials[$i].phase")"
+    val="$(cq ".credentials[$i].value")"
+    gen="$(cq ".credentials[$i].generate")"
+    console="$(cq ".credentials[$i].console")"
+    i=$((i + 1))
+    credential_in_scope "$phase" || continue
+    [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    any=1
+    status="$(credential_status_word "$env" "$val")"
+    say ""
+    say "${C_B}$env${C_RST} — $name  [$status]"
+    [ -z "$console" ] || say "  ${C_DIM}source: $console${C_RST}"
+    if [ -n "$gen" ]; then
+      printf '  [k]eep  [g]enerate  [e]nter  [c]lear  [s]kip: ' >&2
+    else
+      printf '  [k]eep  [e]nter  [c]lear  [s]kip: ' >&2
+    fi
+    IFS= read -r action
+    [ -n "$action" ] || { [ -n "$val" ] && action=k || action=s; }
+    case "$action" in
+      k|K|s|S) : ;;
+      c|C)
+        persist_credential_value "$env" ""
+        ok "$env cleared" ;;
+      g|G)
+        [ -n "$gen" ] || { warn "$env has no generator"; continue; }
+        id="$(credential_generator_id "$gen")" || die "$env has an unsupported generator"
+        generate_credential_value "$id" || die "$env generation failed"
+        validate_credential_value "$env" "$GENERATED_VALUE" || die "$env generated invalid data"
+        persist_credential_value "$env" "$GENERATED_VALUE"
+        unset GENERATED_VALUE
+        ok "$env generated, stored, and validated" ;;
+      e|E)
+        while :; do
+          prompt_secret_value "$env"
+          if validate_credential_value "$env" "$PROMPTED_SECRET_VALUE"; then
+            persist_credential_value "$env" "$PROMPTED_SECRET_VALUE"
+            unset PROMPTED_SECRET_VALUE
+            ok "$env stored and validated"
+            break
+          fi
+          unset PROMPTED_SECRET_VALUE
+          warn "$env rejected: $VALIDATION_MESSAGE"
+          printf '  [r]etry  [s]kip: ' >&2
+          IFS= read -r retry
+          case "$retry" in r|R) : ;; *) break ;; esac
+        done ;;
+      *) warn "unknown choice '$action' — skipped" ;;
+    esac
+    unset val
+  done
+  [ "$any" -eq 1 ] || ok "Phase $SECRETS_PHASE requires no dedicated credentials"
+  say ""
+  cmd_secrets_status
+  say "${C_DIM}next:${C_RST} ./scripts/stack.sh secrets write"
 }
 
 # credentials.yaml -> .env
 cmd_secrets_write() {
   require_credentials
-  local envf dest n i count name env val ph blank=0
+  local envf dir tmp i count name env val ph blank=0 escaped
   envf="$REPO_ROOT/$(qs '.secrets.file')"
-  # NB: "0" is non-empty, so ${DRY_RUN:+...} would always fire — test properly.
-  dest="$envf"
-  [ "$DRY_RUN" -eq 1 ] && dest=/dev/stdout
-
-  if [ -f "$envf" ] && [ "$DRY_RUN" -eq 0 ]; then
-    cp "$envf" "$envf.bak"
-    warn "existing .env backed up to .env.bak"
+  [ ! -L "$envf" ] || die "${envf#"$REPO_ROOT/"} must not be a symlink"
+  [ ! -L "$envf.bak" ] || die "${envf#"$REPO_ROOT/"}.bak must not be a symlink"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "Dry run — would atomically write $(printf '%s' "${envf#"$REPO_ROOT/"}")"
+    cmd_secrets_status
+    return 0
   fi
 
+  dir="$(dirname "$envf")"
+  umask 077
+  tmp="$(mktemp "$dir/.env.tmp.XXXXXX")"
   count="$(cq '.credentials | length')"
-  {
+
+  # A manually edited inventory must pass the same checks as wizard input
+  # before it can replace the runtime file.
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    env="$(cq ".credentials[$i].env")"
+    val="$(cq ".credentials[$i].value")"
+    i=$((i + 1))
+    [ -z "$val" ] && continue
+    if ! validate_credential_value "$env" "$val"; then
+      rm -f "$tmp"
+      die "$env is invalid: $VALIDATION_MESSAGE"
+    fi
+  done
+
+  if ! {
     printf '# GENERATED by `stack.sh secrets write` from %s — DO NOT EDIT.\n' "$CRED_FILE_REL"
     printf '# Edit %s, then re-run. Reviewed: %s\n\n' "$CRED_FILE_REL" "$(cq '.meta.last_reviewed')"
     i=0
@@ -454,12 +893,24 @@ cmd_secrets_write() {
       i=$((i + 1))
       [ -n "$env" ] || continue
       printf '# %s (phase %s)\n' "$name" "$ph"
-      printf '%s=%s\n' "$env" "$val"
+      # Compose treats single-quoted dotenv values literally. Only a literal
+      # single quote needs escaping in that representation.
+      escaped="$val"
+      escaped="${escaped//\'/\\\'}"
+      printf "%s='%s'\n" "$env" "$escaped"
     done
-  } > "$dest"
+  } > "$tmp"; then
+    rm -f "$tmp"
+    die "failed to render .env; existing file was not changed"
+  fi
 
-  [ "$DRY_RUN" -eq 1 ] && return 0
-
+  chmod 600 "$tmp"
+  if [ -f "$envf" ]; then
+    cp "$envf" "$envf.bak"
+    chmod 600 "$envf.bak"
+    warn "existing .env backed up to .env.bak (mode 600)"
+  fi
+  mv "$tmp" "$envf"
   chmod 600 "$envf"
   ok "wrote $(printf '%s' "${envf#"$REPO_ROOT/"}") (mode 600) from $CRED_FILE_REL"
 
@@ -473,28 +924,10 @@ cmd_secrets_write() {
   return 0
 }
 
-# Print a generated value for every credential that declares `generate:`.
-cmd_secrets_gen() {
-  require_credentials
-  local i count env g
-  count="$(cq '.credentials | length')"
-  info "Suggested values for self-generated credentials"
-  say "${C_DIM}Paste into $CRED_FILE_REL, then: ./scripts/stack.sh secrets write${C_RST}"
-  say ""
-  i=0
-  while [ "$i" -lt "$count" ]; do
-    env="$(cq ".credentials[$i].env")"
-    g="$(cq ".credentials[$i].generate")"
-    i=$((i + 1))
-    [ -n "$g" ] || continue
-    printf '  %-34s %s\n' "$env" "$(eval "$g" 2>/dev/null || echo '<generate manually>')"
-  done
-}
-
 # Verify nothing sensitive can reach git, Docker, or an AI tool's index.
 cmd_secrets_audit() {
-  local fail=0 f p
-  local guarded=".env $CRED_FILE_REL"
+  local fail=0 generator_fail=0 f p mode count i env gen
+  local guarded=".env .env.bak $CRED_FILE_REL"
 
   info "Ignore coverage"
   for p in $guarded; do
@@ -527,6 +960,18 @@ cmd_secrets_audit() {
     else ok "$p not in the index"; fi
   done
 
+  info "Local file permissions"
+  for p in .env .env.bak "$CRED_FILE_REL"; do
+    [ -e "$REPO_ROOT/$p" ] || continue
+    if [ -L "$REPO_ROOT/$p" ]; then
+      bad "$p is a symlink — refusing an ambiguous secret target"; fail=1
+      continue
+    fi
+    mode="$(stat -f '%Lp' "$REPO_ROOT/$p" 2>/dev/null || stat -c '%a' "$REPO_ROOT/$p" 2>/dev/null || true)"
+    if [ "$mode" = "600" ]; then ok "$p mode 600"
+    else bad "$p mode is ${mode:-unknown}, expected 600"; fail=1; fi
+  done
+
   # A file can be ignored today and still be sitting in history.
   for p in $guarded; do
     if git -C "$REPO_ROOT" rev-parse HEAD >/dev/null 2>&1 \
@@ -544,6 +989,19 @@ cmd_secrets_audit() {
     else
       bad "credentials.example.yaml contains a non-empty value — scrub it"; fail=1
     fi
+
+    count="$(yq '.credentials | length' "$REPO_ROOT/secrets/credentials.example.yaml")"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      env="$(yq -r ".credentials[$i].env // \"\"" "$REPO_ROOT/secrets/credentials.example.yaml")"
+      gen="$(yq -r ".credentials[$i].generate // \"\"" "$REPO_ROOT/secrets/credentials.example.yaml")"
+      i=$((i + 1))
+      [ -z "$gen" ] && continue
+      if credential_generator_id "$gen" >/dev/null; then :
+      else bad "$env uses a generator outside the allowlist"; fail=1; generator_fail=1
+      fi
+    done
+    [ "$generator_fail" -ne 0 ] || ok "all template generators are allowlisted IDs"
   fi
 
   say ""
@@ -553,10 +1011,15 @@ cmd_secrets_audit() {
 
 cmd_secrets() {
   case "${SECRETS_SUB:-}" in
-    write) cmd_secrets_write ;;
-    gen)   cmd_secrets_gen ;;
-    audit) cmd_secrets_audit ;;
-    *) die "usage: ./scripts/stack.sh secrets <write|gen|audit>" ;;
+    init)              cmd_secrets_init ;;
+    setup)             cmd_secrets_setup ;;
+    set)               cmd_secrets_set ;;
+    generate|gen)      cmd_secrets_generate ;;
+    status)            cmd_secrets_status ;;
+    validate)          cmd_secrets_validate ;;
+    write)             cmd_secrets_write ;;
+    audit)             cmd_secrets_audit ;;
+    *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit>" ;;
   esac
 }
 
@@ -761,8 +1224,13 @@ ${C_B}USAGE${C_RST}
 
 ${C_B}COMMANDS${C_RST}
   doctor      Preflight: tooling, secrets, layers, models
+  secrets init       Create the private credential inventory (mode 600)
+  secrets setup      Choose a phase and interactively configure its credentials
+  secrets set NAME   Set one credential with hidden input and format validation
+  secrets generate   Generate and store local credentials without printing them
+  secrets status     Show set / missing / invalid state without showing values
+  secrets validate   Run offline format validation without showing values
   secrets write   Generate .env from secrets/credentials.yaml
-  secrets gen     Print values for self-generated credentials
   secrets audit   Verify secrets cannot reach git / Docker / AI tool indexes
   phases      Show the build-out phases and which one is current
   config      Show the resolved stack for the selected target/profile
@@ -778,7 +1246,10 @@ ${C_B}FLAGS${C_RST}
   -t, --target <name>    Deployment target (default: stack.yaml defaults.target)
   -p, --profile <name>   Stack profile (default: stack.yaml defaults.profile)
       --tf-var k=v       Extra terraform variable (repeatable)
-      --all              doctor: check secrets for every phase, not just active
+      --phase <1..5>     secrets: operate on one build-out phase
+      --only <ENV_NAME>  secrets: operate on one credential
+      --force            secrets generate: replace values that are already set
+      --all              doctor/secrets: include every phase
       --no-render        Skip config rendering on \`up\`
       --purge            On \`down\`, also delete volumes (DESTRUCTIVE)
   -n, --dry-run          Print the commands instead of running them
@@ -786,6 +1257,11 @@ ${C_B}FLAGS${C_RST}
   -h, --help             This message
 
 ${C_B}EXAMPLES${C_RST}
+  ./scripts/stack.sh secrets setup
+  ./scripts/stack.sh secrets status --phase 1
+  ./scripts/stack.sh secrets generate --phase 1
+  ./scripts/stack.sh secrets set OPENAI_API_KEY
+  ./scripts/stack.sh secrets validate --all
   ./scripts/stack.sh doctor --profile phase-1
   ./scripts/stack.sh up --target docker --profile full
   ./scripts/stack.sh up --target aws-ec2 --tf-var key_name=kp --tf-var allowed_cidr=1.2.3.4/32
@@ -799,8 +1275,13 @@ main() {
   # `secrets` takes a bare subcommand before any flags.
   if [ "$cmd" = "secrets" ]; then
     case "${1:-}" in
-      write|gen|audit) SECRETS_SUB="$1"; shift ;;
-      *) die "usage: ./scripts/stack.sh secrets <write|gen|audit>" ;;
+      init|setup|set|generate|gen|status|validate|write|audit)
+        SECRETS_SUB="$1"; shift
+        if [ "$SECRETS_SUB" = "set" ] && [ $# -gt 0 ]; then
+          case "$1" in -*) : ;; *) SECRETS_ONLY="$1"; shift ;; esac
+        fi
+        ;;
+      *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit>" ;;
     esac
   fi
 
@@ -811,6 +1292,9 @@ main() {
       -f|--file)    STACK_FILE="$2"; shift 2 ;;
       --tf-var)     TF_VARS="$TF_VARS$2
 "; shift 2 ;;
+      --phase)      SECRETS_PHASE="$2"; shift 2 ;;
+      --only)       SECRETS_ONLY="$2"; shift 2 ;;
+      --force)      SECRETS_FORCE=1; shift ;;
       --all)        SHOW_ALL=1; shift ;;
       --no-render)  DO_RENDER=0; shift ;;
       --purge)      PURGE=1; shift ;;
@@ -819,6 +1303,12 @@ main() {
       *) die "unknown flag: $1" ;;
     esac
   done
+
+  [ "$SHOW_ALL" -eq 0 ] || [ -z "$SECRETS_PHASE" ] \
+    || die "--all and --phase cannot be used together"
+  case "$SECRETS_ONLY" in
+    *[!A-Z0-9_]*) die "--only requires an uppercase ENV_NAME" ;;
+  esac
 
   case "$cmd" in
     help|-h|--help) usage ;;

@@ -4,11 +4,13 @@ Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse C
 
 ```mermaid
 flowchart LR
-    C["<b>secrets/credentials.yaml</b><br/><small>you edit this</small>"]
+    W["<b>secrets setup</b><br/><small>phase-aware · hidden input</small>"]
+    C["<b>secrets/credentials.yaml</b><br/><small>private · mode 600</small>"]
     E["<b>.env</b><br/><small>generated · mode 600</small>"]
     D["docker compose"]
     T["terraform"]
 
+    W --> C
     C -->|"secrets write"| E
     E --> D
     E --> T
@@ -19,31 +21,37 @@ flowchart LR
     class E gen
 ```
 
-`secrets/credentials.yaml` is the only credential file you hand-edit. `.env` is derived from it and **gets overwritten** — never edit it directly.
+`secrets/credentials.yaml` is the private source of truth. The phase-aware setup
+command updates it with hidden input; `.env` is derived from it and **gets
+overwritten**. Neither command prints secret values.
 
 ---
 
 ## Setup
 
 ```bash
-cp secrets/credentials.example.yaml secrets/credentials.yaml
-./scripts/stack.sh secrets gen            # values for the self-generated keys
-$EDITOR secrets/credentials.yaml          # paste those + your provider keys
-./scripts/stack.sh secrets write          # generate .env (mode 600)
-./scripts/stack.sh doctor                 # verify the stack sees them
+./scripts/stack.sh secrets init
+./scripts/stack.sh secrets setup           # choose Phase 1..5 interactively
+./scripts/stack.sh secrets status --all    # set / missing / invalid, no values
+./scripts/stack.sh secrets validate --all  # offline format checks
+./scripts/stack.sh secrets write           # atomic .env write, mode 600
+./scripts/stack.sh doctor
 ```
 
-`secrets gen` prints a fresh value for every credential that declares a `generate:` command:
+You can also operate on one phase or one key:
 
-```console
-$ ./scripts/stack.sh secrets gen
-==> Suggested values for self-generated credentials
-
-  LITELLM_MASTER_KEY                 sk-f0476d619643e60b4e415c8b09320937fc0b315ccbd803a8
-  LITELLM_SALT_KEY                   8e876ba991f91b74a465c93587a499774294888d30227840079b7798bc65af35
-  NEXTAUTH_SECRET                    kRHoSMTAbV0rJ4vVb+dY80QVuSovpTm3TWSPE5HH4BQ=
-  CLICKHOUSE_PASSWORD                8cf628e750a627956d67a9df30c2c41b
+```bash
+./scripts/stack.sh secrets generate --phase 1
+./scripts/stack.sh secrets set OPENAI_API_KEY
+./scripts/stack.sh secrets status --phase 1
+./scripts/stack.sh secrets validate --phase 1
 ```
+
+`generate` stores locally generated values directly and reports only status.
+Existing values are preserved unless `--force` is supplied. `set` accepts one
+value with terminal echo disabled and rejects invalid shapes before persisting
+it. Phase 5 currently has no dedicated credentials, which is reported
+explicitly rather than treated as an error.
 
 ---
 
@@ -55,12 +63,12 @@ Each entry's `console:` field in `secrets/credentials.yaml` is the authoritative
 
 ### Kind 1 — self-generated (no browser, no account)
 
-These are passwords for services this stack runs itself. Nobody issues them to you; you invent them, and `secrets gen` invents better ones than you will.
+These are passwords for services this stack runs itself. Nobody issues them to you; you invent them, and `secrets generate` creates and stores stronger values without printing them.
 
 `LITELLM_MASTER_KEY` · `LITELLM_SALT_KEY` · `NEXTAUTH_SECRET` · `LANGFUSE_SALT` · `CLICKHOUSE_PASSWORD` · `POSTGRES_PASSWORD` · `MINIO_ROOT_PASSWORD` · `ARTIFACT_MINIO_ROOT_USER` · `ARTIFACT_MINIO_ROOT_PASSWORD` · `VLLM_API_KEY`
 
 ```bash
-./scripts/stack.sh secrets gen      # prints a fresh value for each of these
+./scripts/stack.sh secrets generate --phase 1
 ```
 
 `VLLM_API_KEY` is in this list for a reason worth noticing: it is not issued by RunPod. You choose a value and pass it to `vllm serve --api-key` — see vLLM's [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) docs. That is what makes it easy to skip, and skipping it leaves [an open GPU on the internet](#security-posture).
@@ -114,9 +122,13 @@ It also creates a real ordering problem. LiteLLM reads the Langfuse keys **at st
 
 ### What this means for a first run
 
-For **Phase 1** — the only phase that runs today — the actual human work is: **create two provider keys and run `secrets gen`.** With headless initialization that is the whole browser trip. Everything else is generated locally.
+For **Phase 1** — the only phase that runs today — start with the phase-aware
+wizard. It shows which values are already set, generates local credentials,
+and accepts provider keys with hidden input and immediate format validation.
 
-Phases 2–4 add credentials, but `doctor` stays quiet about them until you select that phase, so they are never in your way early.
+Phases 2–4 add credentials, but the wizard and status commands can select one
+phase at a time, so later-phase values are never in your way early. Phase 5 is
+made from recipes over existing layers and currently adds no credentials.
 
 ---
 
@@ -134,25 +146,26 @@ Filling this in by hand is the single most error-prone part of standing the stac
 
 So the classification is not documentation — it is the control flow.
 
-### The proposed flow
-
-!!! danger "`secrets init` does not exist — this is a design sketch"
-    The implemented subcommands are `secrets write`, `secrets gen` and `secrets audit`. Everything in this section is a proposal; the flags below are not accepted by anything today.
+### The implemented flow
 
 ```
-# NOT IMPLEMENTED — proposed interface
-stack.sh secrets init [--phase N] [--only NAME] [--force] [--from-env]
+stack.sh secrets setup [--phase 1..5] [--only ENV_NAME]
 
-  for each credential the selected phase needs:
-    kind 1 (generate:)   → generate, write, never prompt
-    kind 2 (console:)    → print the official guide URL, open the console,
-                           read -rs, validate before accepting
-    kind 4 (provisioned) → prompt, showing the expected shape
+  for each credential in the selected phase:
+    show set / missing / invalid without showing the value
+    show its source or provider console
+    offer keep / generate / hidden entry / clear / skip
+    validate before an entered or generated value is persisted
 ```
 
-Note there is **no kind 3 branch**, and that is the design win. Because Langfuse accepts its key pair via `LANGFUSE_INIT_*`, the wizard generates those keys like any other secret and Langfuse adopts them on first boot. One pass, no browser trip for them, and no "traces are not appearing" phase to explain.
+The same primitives are also available independently: `secrets init` creates
+the private inventory, `secrets generate --phase N` fills locally generated
+entries without printing them, `secrets set NAME` accepts one hidden value,
+and `secrets status` / `secrets validate` are safe to use while screen-sharing.
 
-That is worth stating as a principle rather than a detail: **when a service will accept a credential you chose, choosing it is better than fetching it.** It removes an ordering dependency, a manual step, and a failure mode all at once.
+Langfuse project keys remain a two-pass item until its headless initialization
+variables are wired into the Phase 1 Compose file. Scraping the UI is
+deliberately not part of the wizard.
 
 ### A validation ladder, cheapest first
 
@@ -161,6 +174,12 @@ That is worth stating as a principle rather than a detail: **when a service will
 | **Shape** | prefix, length, no whitespace | free, offline | paste errors, truncation, trailing newline — most real mistakes |
 | **Liveness** | one minimal authenticated call | one request | revoked keys, wrong account, no credit |
 | **Scope** | the credential can do what is needed, **and not more** | a few requests | over-privileged credentials |
+
+`secrets validate` implements the first level offline. It checks known
+prefixes, lengths, URL shapes, AWS identifiers and regions, and rejects
+multi-line input or the unsafe `0.0.0.0/0` CIDR. It does not make billable
+provider requests or claim that a key is live; liveness and least-privilege
+scope checks remain provider-specific follow-up work.
 
 The third level is the one worth building deliberately, because it is the only one that catches a *dangerous* success. For the ClickHouse Cloud user, "valid" is not enough — the check should assert that a `SELECT` succeeds **and that a write fails**. A credential that passes both is verified least-privilege. A credential that passes only the first is a finding.
 
@@ -178,7 +197,8 @@ A wizard that collects secrets is a new place for secrets to leak. Non-negotiabl
 
 ### Idempotency, because setup gets interrupted
 
-- an entry that already has a value is **skipped**, not re-asked, unless `--force` or `--only`
+- `secrets generate` preserves an existing value unless `--force` is explicit
+- the interactive wizard defaults to keeping a set value and never overwrites silently
 - a run that dies halfway leaves earlier answers intact and can be resumed
 - nothing is overwritten silently — that is how a working key gets replaced by a typo
 
@@ -226,7 +246,7 @@ Each entry records more than a value — where to get it, what scopes it needs, 
 | `env` | The variable name the stack reads — must match `stack.yaml` `secrets:` |
 | `value` | The secret itself. Empty in the committed template |
 | `console` | Where to obtain or rotate it |
-| `generate` | Shell command producing a value, for self-generated secrets |
+| `generate` | Allowlisted generator ID, such as `hex-16`; never a shell command |
 | `scopes` | Least-privilege grants this credential should have |
 | `phase` | Which build-out phase needs it |
 | `owner` / `rotates` | Accountability and cadence for audits |

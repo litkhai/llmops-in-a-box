@@ -132,9 +132,9 @@ flowchart TB
 ```bash
 brew install yq
 
-cp secrets/credentials.example.yaml secrets/credentials.yaml
-./scripts/stack.sh secrets gen       # values for self-generated keys
-$EDITOR secrets/credentials.yaml     # paste those + your provider keys
+./scripts/stack.sh secrets init
+./scripts/stack.sh secrets setup     # choose Phase 1..5; input is hidden
+./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh secrets write     # generate .env (mode 600)
 
 ./scripts/stack.sh doctor            # preflight

@@ -16,9 +16,9 @@ Two targets, one config. The target is a **flag**, not a fork in the config tree
 `scripts/stack.sh` targets bash 3.2, so macOS system bash works with no upgrade.
 
 ```bash
-cp secrets/credentials.example.yaml secrets/credentials.yaml
-./scripts/stack.sh secrets gen
-$EDITOR secrets/credentials.yaml
+./scripts/stack.sh secrets init
+./scripts/stack.sh secrets setup
+./scripts/stack.sh secrets validate --phase 1
 ./scripts/stack.sh secrets write
 ./scripts/stack.sh doctor
 ```
