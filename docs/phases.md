@@ -255,13 +255,13 @@ Same prompt, three models — `gpt-4o`, `claude-sonnet`, `qwen-7b` — one Langf
 
 ---
 
-### Phase 4 — Artifact storage
+### Phase 4 — Storage and large context
 
 :material-timer-sand: **Planned**
 
-A **MinIO AIStor** instance for the things the stack produces and consumes but Langfuse should not own: evaluation datasets, eval run artifacts, and self-hosted model weights — and, once [4b](#two-tracks-and-only-one-of-them-waits) lands, the offload tier for cached KV blocks.
+A **MinIO AIStor** instance for the things the stack produces and consumes but Langfuse should not own: evaluation datasets, eval run artifacts, and self-hosted model weights — and, when vLLM runs locally, the backend for [4a](#phase-4a-kv-cache-reuse).
 
-**Adds** `storage`
+**Adds** `storage` · `kvcache`
 
 ```bash
 ./scripts/stack.sh up --profile phase-4
@@ -295,14 +295,51 @@ AIStor Free includes erasure coding and bitrot protection, with community Slack 
 
 The line to watch is *nodes*, not terabytes: the moment the deployment goes multi-node it becomes Enterprise Lite. Worth stating plainly to a customer, because "free" and "unlimited capacity" together tend to invite the follow-up question.
 
+---
+
+### Phase 4a — KV-cache reuse
+
+:material-timer-sand: **Planned — buildable, no vendor conversation needed**
+
+The second half of Phase 4, and the reason it is "large context" and not just "storage". A long shared prefix — a system prompt, a policy document, a codebase — is prefilled **once** and reused, instead of recomputed on every request. LMCache's published figure for a 128K-token prompt on an H100 is TTFT around 11s cold against roughly 1.5s on a cache hit.
+
+```yaml
+# stack.yaml — layers.kvcache
+impl: lmcache
+managed_by: follows-serving      # not a container: runs in-process with vLLM
+requires: [serving]
+options:
+  prefix_caching: true           # vLLM built-in, useful on its own
+  backend_by_serving:
+    runpod: pod-local            # CPU RAM + NVMe on the GPU pod
+    compose: s3                  # the `storage` layer above
+```
+
+**This layer is not a container**, which is why `managed_by` is `follows-serving`. LMCache runs inside the vLLM process, so its lifecycle is the serving layer's — and the same declaration stays correct whether vLLM is on a RunPod pod or in a local compose service.
+
+#### The backend is a per-target choice, and that is what makes every phase portable
+
+| Where vLLM runs | Cache backend | Why |
+|---|---|---|
+| RunPod pod (`--target docker` or `aws-ec2`) | **pod-local** — the pod's CPU RAM and NVMe | the cache never leaves the pod, so nothing has to be reachable |
+| Local compose service, on an NVIDIA host | **s3** — the `storage` layer on 9012 | everything is on one machine, so the object store is local too |
+
+!!! danger "Do not point a remote pod at a laptop's object store"
+    It is the obvious-looking way to make the laptop target "support" Phase 4, and it is wrong for two independent reasons:
+
+    - **It would be slower than no cache at all.** KV-cache offload only pays when fetching a block beats recomputing prefill. 2–16 MB blocks over a residential uplink do not, so you would ship a feature that makes the demo worse.
+    - **The blocks are derived from prompts.** Routing them through a third-party tunnel contradicts the sovereignty argument this whole stack exists to make.
+
+    Selecting a pod-local backend costs nothing and avoids both.
+
 !!! warning "\"Free at one node\" is the object store only — it does not extend to MemKV"
-    These tiers are published for **AIStor**, the object storage product. [MemKV](#phase-4b-kv-cache-offload) is a separate product, and nothing in the tier announcement covers it — its own page offers no free tier, no trial and no download, only *"Talk to a Specialist"* and *"Get Pricing"*.
+    These tiers are published for **AIStor**, the object storage product. [MemKV](#phase-4b-kv-cache-offload-at-fleet-scale) is a separate product, and nothing in the tier announcement covers it — its own page offers no free tier, no trial and no download, only *"Talk to a Specialist"* and *"Get Pricing"*.
 
     So do not carry "MinIO is free at one node" across to the KV-cache work. Phase 4's storage is free; Phase 4b is a commercial conversation. Conflating the two is an easy way to promise a customer something that was never offered.
 
 ---
 
-### Phase 4b — KV-cache offload
+### Phase 4b — KV-cache offload at fleet scale
 
 :material-handshake-outline: **Needs a partnership conversation with MinIO — not self-serve**
 
@@ -318,7 +355,7 @@ That is not something a `docker compose up` on a laptop, or a single RunPod pod,
 
 **Which makes the next step a partnership discussion, not an install.** There is no path where someone on this project downloads MemKV and tries it over an afternoon. Getting to an evaluation means going to MinIO directly and asking: is there an early-access or design-partner programme, what hardware would we actually need in front of it, what does the licensing look like, and is there anything that can be demonstrated before NVIDIA STX systems are obtainable.
 
-Worth being precise about the framing. This is **not** blocked on a purchase order — you cannot buy your way in this quarter — and it is **not** covered by the AIStor Free tier that makes [Phase 4](#phase-4-artifact-storage) free. It is a commercial relationship to open, and that is a different kind of task with a different owner.
+Worth being precise about the framing. This is **not** blocked on a purchase order — you cannot buy your way in this quarter — and it is **not** covered by the AIStor Free tier that makes [Phase 4](#phase-4-storage-and-large-context) free. It is a commercial relationship to open, and that is a different kind of task with a different owner.
 
 **And it is not a semantic cache.** `stack.yaml` currently declares `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. Those settings describe a different mechanism:
 
@@ -331,29 +368,10 @@ Worth being precise about the framing. This is **not** blocked on a purchase ord
 | Correctness risk | can serve a near-miss answer as if exact | none — identical math |
 | Fits this stack | yes, LiteLLM supports it natively | no, needs STX-class hardware |
 
-#### Two tracks, and only one of them waits
-
-The *capability* MemKV sells is not gated behind MemKV. Splitting them is what keeps this phase from being blocked on someone else's roadmap.
-
-| | **Buildable now** | **Partnership track** |
-|---|---|---|
-| What | vLLM prefix caching, then [LMCache](https://github.com/lmcache/lmcache) | MinIO MemKV |
-| Scale | one pod, one GPU | GPU fleet, petabyte cache pool |
-| Hardware | the Phase 3 RunPod pod | NVIDIA STX, Vera, Spectrum-X, PCIe Gen6 |
-| Cache lives on | GPU memory → CPU RAM, local disk, or S3-compatible | NVMe over RDMA |
-| Access | `pip install`, one flag | Talk to a Specialist |
-| Status | **do this** | conversation to open |
-
-**Track 1 — what to actually build.** vLLM's `--enable-prefix-caching` reuses the KV cache for a shared prompt prefix inside GPU memory: one flag on the Phase 3 pod. LMCache then takes the same cache off the GPU, so it can outlive a restart and exceed GPU memory, with backends including CPU RAM, local SSD, Redis/Valkey and **S3-compatible object storage**.
-
-That last backend is the useful coincidence: **the Phase 4 AIStor instance can be the KV-cache store.** The object store stops being only an artifact bucket and becomes the flash tier for cached context — structurally the same idea MemKV productises, at the scale this stack actually runs at.
-
-**Track 2 — MemKV.** Left as the scale-out path, with the partnership conversation as its next step rather than an install.
-
 !!! note "What is still not scheduled"
-    A **semantic cache** — embed the prompt, return a stored response above a similarity threshold — is a different mechanism from everything above and is *not* part of this track. LiteLLM supports it natively with a Redis backend if it is ever wanted, but it trades correctness for latency in a way KV-cache reuse does not, so it should be decided on its own terms.
+    A **semantic cache** — embed the prompt, return a stored response above a similarity threshold — is a different mechanism from both the `kvcache` layer and MemKV, and is not part of either. LiteLLM supports it natively with a Redis backend if it is ever wanted, but it trades correctness for latency in a way KV-cache reuse does not, so it should be decided on its own terms.
 
-    `stack.yaml`'s `memory` layer still carries `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. That mismatch is annotated in place rather than rewritten, because resolving it means choosing which of the three things above the layer is supposed to be.
+    `stack.yaml`'s `memory` layer still carries `semantic_cache: true` and `similarity_threshold: 0.95` under `impl: memkv`. That mismatch is annotated in place rather than rewritten, because resolving it means choosing which of the three mechanisms the layer was supposed to be.
 
 ---
 

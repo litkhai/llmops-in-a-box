@@ -60,16 +60,18 @@ phases:
     adds_layers: [serving]
     adds_models: [qwen-7b]
   4:
-    name: Artifact storage
+    name: Storage and large context
     status: planned
     scope: >-
       A MinIO AIStor instance for datasets, eval artifacts and model weights,
       separate from the blob store Langfuse runs for its own event uploads.
-      AIStor Free covers a single node with no capacity limit, so this phase
-      carries no licence cost.
+      AIStor Free covers a single node with no capacity limit, so the object
+      store carries no licence cost. Also adds KV-cache reuse, so a long shared
+      prompt prefix is prefilled once instead of per request.
     # Was [memory] only — `storage` was missing here while profiles.phase-4,
-    # README and the docs all listed both. Fixed; the layer is `storage`.
-    adds_layers: [storage]
+    # README and the docs all listed both. Fixed, and `kvcache` added: that is
+    # the buildable half of what the `memory` layer was pretending to be.
+    adds_layers: [storage, kvcache]
     adds_models: []
   # The `memory` layer is deliberately NOT in any phase yet. See the layer
   # definition below for why MemKV cannot be a container in this stack.
@@ -125,14 +127,14 @@ profiles:
   #    `memory` is intentionally absent: MemKV needs NVIDIA STX hardware and
   #    cannot come up here. See layers.memory.
   phase-4:
-    description: "Phase 4 — Phase 3 plus the MinIO AIStor artifact store"
-    layers: [gateway, observability, ui, tools, serving, storage]
+    description: "Phase 4 — Phase 3 plus the artifact store and KV-cache reuse"
+    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
 
   # ── Phase 5 — operating recipes. Same layers as Phase 4 by design: these
   #    are things to *do* with the stack, not things to add to it. ──
   phase-5:
     description: "Phase 5 — Phase 4 plus operating recipes (no new layers)"
-    layers: [gateway, observability, ui, tools, serving, storage]
+    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
 
   # ── Convenience aliases, independent of phase ──
 
@@ -145,7 +147,7 @@ profiles:
   # it here contradicted the docs, which say it belongs to no phase or profile.
   full:
     description: Every layer whose `enabled` is true
-    layers: [gateway, observability, ui, tools, serving, storage]
+    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
 
   # Gateway + traces, no chat UI. For SDK / script-driven demos.
   headless:
@@ -169,6 +171,23 @@ targets:
     compose_file: docker/docker-compose.yml
     env_file: .env
     host: localhost
+    # Every phase is supported here. Worth stating as a declaration rather than
+    # leaving to prose, because the reason it holds is not obvious: `serving`
+    # was never a compose service (managed_by: runpod), so the GPU is reached
+    # over HTTPS exactly like a commercial API, and the laptop needs no GPU of
+    # its own. Phase 4's `kvcache` then selects a pod-local backend instead of
+    # the local object store, which is the one thing that would not have
+    # worked. See layers.kvcache.
+    supported_phases: [1, 2, 3, 4, 5]
+    notes:
+      3: >-
+        Requires VLLM_API_BASE to point at a running pod. That is a pod
+        requirement, not a target one — aws-ec2 needs it just the same.
+      4: >-
+        The artifact store runs locally on 9011/9012. KV-cache offload uses the
+        pod's own CPU RAM and NVMe, not this object store, because a pod cannot
+        reach a laptop behind NAT — and tunnelling it would be slower than no
+        cache at all.
 
   aws-ec2:
     kind: terraform
@@ -343,7 +362,49 @@ layers:
     requires: []                # MinIO on 9001/9002
     options:
       api_port: 9012
-      buckets: [datasets, artifacts, weights]
+      # `kvcache` is here because this one instance serves two roles: the
+      # user-facing artifact store, and the S3 backend for `kvcache` below when
+      # vLLM runs locally. One container, two jobs.
+      buckets: [datasets, artifacts, weights, kvcache]
+
+  # ── Phase 4 — KV-cache reuse. Buildable today, unlike `memory` below. ──
+  #
+  #  Not a container. LMCache runs in-process with vLLM, so this layer's
+  #  lifecycle follows the serving layer's — hence managed_by `follows-serving`
+  #  rather than compose or runpod. The script treats anything that is not
+  #  `compose` as externally managed, which is the correct handling here, and
+  #  the same declaration stays true whether vLLM is on a RunPod pod or in a
+  #  local compose service.
+  #
+  #  The backend is a per-target decision, and that is what lets every phase
+  #  work on every target:
+  #
+  #    serving remote (runpod)  → pod-local : CPU RAM + NVMe on the GPU pod
+  #    serving local  (compose) → s3        : the `storage` layer above
+  #
+  #  Do NOT point a remote pod at a laptop's object store, tunnel or otherwise.
+  #  Either reason alone is sufficient:
+  #    • KV-cache offload only pays when fetching a block beats recomputing
+  #      prefill. 2-16 MB blocks over a residential uplink do not, so it would
+  #      be slower than having no cache — a worse demo, not a better one.
+  #    • The blocks are derived from prompts. Routing them through a
+  #      third-party tunnel contradicts the sovereignty argument this stack
+  #      exists to make.
+  kvcache:
+    phase: 4
+    enabled: false
+    impl: lmcache
+    managed_by: follows-serving
+    compose_profile: null
+    requires: [serving]
+    options:
+      # vLLM's built-in prefix caching is the first step and is useful alone,
+      # in GPU memory, with no backend at all.
+      prefix_caching: true
+      backend_by_serving:
+        runpod: pod-local
+        compose: s3
+      s3_bucket: kvcache
 
   # ── NOT IN ANY PHASE — blocked on hardware. Read before enabling. ──
   #

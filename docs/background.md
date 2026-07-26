@@ -213,7 +213,7 @@ Terms used throughout these docs, in the sense they are used here.
 
 ### Inference internals
 
-Relevant to [Phase 3](phases.md#phase-3-self-hosted-serving), and to reading [Phase 4b](phases.md#phase-4b-kv-cache-offload) without taking the vendor page on faith.
+Relevant to [Phase 3](phases.md#phase-3-self-hosted-serving), and to reading [Phase 4b](phases.md#phase-4b-kv-cache-offload-at-fleet-scale) without taking the vendor page on faith.
 
 | Term | Meaning |
 |---|---|
