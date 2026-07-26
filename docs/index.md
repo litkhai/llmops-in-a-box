@@ -121,7 +121,8 @@ flowchart TB
 | Serving | vLLM | 3 |
 | Models | Self-hosted — Qwen, EXAONE, EEVE | 3 |
 | Compute | RunPod · AWS | 3 |
-| Storage | MinIO AIStor — datasets, artifacts, weights · free at one node | 4 |
+| Storage | MinIO AIStor — datasets, artifacts, weights · object store free at one node | 4 |
+| KV cache | LMCache — prefill a long shared prefix once, reuse it | 4a |
 | *(recipes)* | Context routing · LibreChat Agents · Langfuse evals — no new layer | 5 |
 
 ---

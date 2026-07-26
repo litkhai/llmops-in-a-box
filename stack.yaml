@@ -194,6 +194,18 @@ targets:
     description: Single EC2 instance bootstrapped with the same compose stack
     dir: terraform
     host: null                  # resolved from the `public_ip` terraform output
+    # Same five phases as `docker`, and for the same reason — it runs the same
+    # compose stack, so the phase support is a property of the stack rather
+    # than of the host. Phase 4's cache backend still follows where vLLM runs:
+    # a remote pod keeps its cache pod-local regardless of what is deployed
+    # here. See layers.kvcache.
+    supported_phases: [1, 2, 3, 4, 5]
+    notes:
+      4: >-
+        A publicly addressable host means the object store *could* serve as the
+        cache backend for a remote pod. Do not — see layers.kvcache for why the
+        latency makes that worse than no cache. Keep the backend pod-local
+        unless vLLM runs on this host.
     vars:
       instance_type: t3.xlarge
       volume_size_gb: 100

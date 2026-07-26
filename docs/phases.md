@@ -19,8 +19,11 @@ Phase 1 has not started. This is the verified state of the repository before it 
 | Check | Evidence |
 |---|---|
 | `stack.yaml` parses, schema 1 | `doctor` reports it |
-| `phases`, `config`, `models`, `render`, `secrets`, `urls` | all run; `config --profile phase-N` resolves for every phase |
+| `phases`, `config`, `models`, `render`, `secrets`, `urls` | all run |
+| **All eight profiles resolve** | `phase-1` … `phase-5`, `full`, `headless`, `airgapped` |
 | Layer dependencies resolve transitively | a profile naming a disabled layer warns and skips rather than failing |
+| Every phase is supported on both targets | `targets.*.supported_phases` declares it; Phase 4's cache backend is selected per target rather than requiring a reachable object store |
+| `render` is idempotent | re-running leaves `docker/` unchanged |
 | Every command named in these docs exists | cross-checked against the script's dispatch — no documented command is missing |
 | Every flag named in these docs exists | `--target` `--profile` `--file` `--tf-var` `--all` `--no-render` `--purge` `--dry-run`, plus short forms `-t -p -f -n -h` |
 | Internal doc links and anchors | zero broken across all pages |

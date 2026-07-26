@@ -37,10 +37,12 @@ This repository is a **reference architecture + deployment scripts** that answer
 ├─ Serving ────────── vLLM                              Phase 3
 ├─ Models ─────────── Self-hosted (Qwen, EXAONE, ...)   Phase 3
 ├─ Compute ────────── RunPod / AWS                      Phase 3
-└─ Storage ────────── MinIO AIStor — artifacts + KV cache  Phase 4
-                      (object store: free at one node)
+├─ Storage ────────── MinIO AIStor — datasets/evals/weights Phase 4
+│                     (object store: free at one node)
+└─ KV cache ───────── LMCache — reuse a long shared prefix  Phase 4a
+                      (in-process with vLLM, not a container)
 
-   Operating recipes ─ context routing · agents · evals    Phase 5
+   Operating recipes ─ context routing · agents · evals      Phase 5
    (no new layers — things to do with the stack above)
 ```
 
