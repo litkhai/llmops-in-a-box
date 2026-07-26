@@ -38,12 +38,15 @@ jobs:
       # rather than shipping a 404.
       - run: mkdocs build --strict
 
-      # enablement: true creates the Pages site via the API on first run, so
-      # the workflow does not depend on someone having clicked through
-      # Settings → Pages first. Without it the action 404s on a fresh repo.
+      # ONE-TIME PREREQUISITE — this step fails until Pages is switched on:
+      #   Settings → Pages → Build and deployment → Source: GitHub Actions
+      #
+      # `enablement: true` is deliberately NOT used here. It calls
+      # POST /repos/{owner}/{repo}/pages, which the default GITHUB_TOKEN may
+      # not do ("Resource not accessible by integration"). The `pages: write`
+      # permission below allows deploying to an existing Pages site, not
+      # creating one — that needs repo-admin rights.
       - uses: actions/configure-pages@v6
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v5
         with:
