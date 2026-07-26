@@ -1,4 +1,5 @@
-# Sovereign AI Stack
+# LLMOPS In a Box
+## Sovereign AI Stack
 
 > **A composable, self-hosted enterprise AI stack — model serving, unified gateway, chat UI, and full-stack observability, built on open infrastructure.**
 >
