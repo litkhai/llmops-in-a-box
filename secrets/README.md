@@ -21,6 +21,20 @@ generated secrets with the appropriate input mode. `.env` is generated from it
 and is what LiteLLM, Langfuse, LibreChat, and Terraform actually read. Never
 hand-edit `.env`.
 
+Main-menu shortcuts:
+
+| Key | Action |
+|:---:|---|
+| `d` | Set default ID/email/password credentials for compatible technologies |
+| `g` | Generate all missing internal values |
+| `w` | Validate and write `.env` |
+| `q` | Finish |
+
+`DEFAULT_EMAIL` is prompted after choosing `d` when the current phase/filter
+contains an email target such as `LANGFUSE_INIT_USER_EMAIL`; it is not prompted
+just by opening the setup screen. Inside a credential, use `c` to copy, `r` to
+reveal, `e` to replace, `d` to delete, and `b` to return.
+
 ```
 secrets/credentials.yaml  ──secrets write──►  .env  ──►  docker compose / terraform
       (private, 0600)                   (generated, 0600)

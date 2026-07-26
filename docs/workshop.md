@@ -50,6 +50,13 @@ brew install yq            # mikefarah v4 — the script refuses other builds
 ./scripts/stack.sh secrets setup --phase 1
 ```
 
+You will see these main actions at the bottom of the first screen:
+
+```console
+[d] set default credentials   [g] generate missing internal values   [w] write .env
+Select a group [1-N], [d], [g], [w], or [q/Enter] finish:
+```
+
 The setup hub shows Phase 1 credentials grouped by technology. Work through it
 in this order:
 
@@ -63,6 +70,18 @@ in this order:
    value. Existing values are preserved.
 4. Press `w` to validate the inventory and atomically write `.env` with mode
    `600`, then `q` to finish.
+
+After pressing `d`, expect all three prompts:
+
+```console
+Enter DEFAULT_ID:
+Enter DEFAULT_EMAIL:
+Enter DEFAULT_PASSWORD (input hidden):
+```
+
+The wizard does not ask for email merely by opening the setup screen. It asks
+when `d` is selected because email is one semantic default credential type,
+not a value every technology accepts.
 
 All values land in the gitignored `secrets/credentials.yaml` at mode `600`.
 They stay hidden unless you explicitly select a configured item and choose `c`

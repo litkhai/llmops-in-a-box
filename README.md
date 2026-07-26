@@ -284,6 +284,20 @@ Each entry records more than the value — the console URL to get it, the scopes
 ./scripts/stack.sh secrets audit           # verify nothing can leak
 ```
 
+Inside `secrets setup`, the main shortcuts are:
+
+| Key | Action |
+|:---:|---|
+| `d` | Set default credentials; for Phase 1 this prompts for ID, **email**, and password |
+| `g` | Generate every missing internal credential |
+| `w` | Validate and write `.env` |
+| `q` | Finish |
+
+Email is not requested on menu entry. Select `d`; it is mapped to Langfuse
+while the ID is mapped to LiteLLM and compatible local service usernames.
+Credential submenus use `c` to copy, `r` to reveal, `e` to replace, `d` to
+delete, and `b` to go back.
+
 ### Ignore coverage
 
 `secrets/credentials.yaml` and `.env` are excluded from git, from Docker build contexts, and from every AI coding tool's index:

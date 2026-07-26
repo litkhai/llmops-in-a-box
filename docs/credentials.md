@@ -41,6 +41,32 @@ terminal-scrollback warning.
 ./scripts/stack.sh doctor
 ```
 
+The first screen ends with the main actions:
+
+```console
+[d] set default credentials   [g] generate missing internal values   [w] write .env
+Select a group [1-N], [d], [g], [w], or [q/Enter] finish:
+```
+
+| Where | Key | Action |
+|---|:---:|---|
+| Main menu | `d` | **Set default credentials** — prompt for the ID, email, and password types used by the current phase/filter |
+| Main menu | `g` | Generate all missing internal credentials without replacing existing values |
+| Main menu | `w` | Validate the inventory and atomically write `.env` |
+| Main menu | `q` / Enter | Finish setup |
+| Technology menu | number | Open one credential for input or management |
+| Configured credential | `c` / `r` | Copy to clipboard / reveal after a scrollback warning |
+| Configured credential | `e` / `d` | Replace / delete the selected value |
+| Generated credential | `g` | Generate or regenerate that one value |
+| Submenu | `b` | Return to the previous menu |
+
+!!! important "Email is collected by `d`, not on menu entry"
+    With `--phase 1`, choosing `d` prompts in this order:
+    `DEFAULT_ID` → `DEFAULT_EMAIL` → `DEFAULT_PASSWORD`. The email maps to
+    `LANGFUSE_INIT_USER_EMAIL`; the ID maps to LiteLLM and compatible local
+    service usernames. If a phase or `--only` filter contains no email target,
+    the email prompt is intentionally omitted.
+
 For a first run, use the setup menu in this order:
 
 1. `d` — optionally set a default ID, email, and password. Each technology
@@ -50,9 +76,6 @@ For a first run, use the setup menu in this order:
 4. `w` — validate everything and atomically write `.env`.
 5. `q` — finish. Re-run the menu at any time; existing values are preserved
    unless you explicitly replace, delete, or regenerate them.
-
-Configured items offer `c` to copy, `r` to reveal after confirmation, `e` to
-replace, and `d` to delete. Generated items also offer `g` to regenerate.
 
 You can also operate on one phase or one key:
 
