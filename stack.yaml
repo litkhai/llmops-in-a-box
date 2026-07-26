@@ -552,6 +552,12 @@ secrets:
       # unauthenticated Redis mode in its compose topology.
       - LANGFUSE_ENCRYPTION_KEY
       - REDIS_AUTH
+      # Headless initialization seeds the org, project and API key pair from
+      # the variables above. Without these two it stops short of a login
+      # account, and someone has to register through the UI on first visit —
+      # which is the manual step the whole approach exists to remove.
+      - LANGFUSE_INIT_USER_EMAIL
+      - LANGFUSE_INIT_USER_PASSWORD
       - CLICKHOUSE_PASSWORD
       - POSTGRES_PASSWORD
       - MINIO_ROOT_PASSWORD
