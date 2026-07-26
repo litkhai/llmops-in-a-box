@@ -523,6 +523,17 @@ credential_in_scope() {
   [ "$phase" = "$SECRETS_PHASE" ]
 }
 
+credential_input_mode() {
+  local env="$1" gen="$2" mode
+  mode="$(yq -r ".credentials[] | select(.env == \"$env\") | .input // \"\"" "$CRED_FILE")"
+  if [ -z "$mode" ]; then
+    mode="$(yq -r ".credentials[] | select(.env == \"$env\") | .input // \"\"" "$CRED_TEMPLATE")"
+  fi
+  if [ -n "$mode" ]; then printf '%s' "$mode"
+  elif [ -n "$gen" ]; then printf 'generated'
+  else printf 'external'; fi
+}
+
 credential_generator_id() {
   # Accept the original exact commands for existing private inventories, but
   # never eval them. New templates use the stable IDs on the left.
@@ -781,12 +792,16 @@ cmd_secrets_generate() {
 }
 
 cmd_secrets_setup() {
-  local count i env name phase val gen console status action retry id any=0
+  local count i env name phase val gen console input status action retry any=0
   cmd_secrets_init >/dev/null
   select_secrets_phase
   require_credentials
-  info "Interactive credential setup  ${C_DIM}phase=$SECRETS_PHASE${C_RST}"
-  say "${C_DIM}Values are hidden. Existing values are kept unless you explicitly replace or clear them.${C_RST}"
+  info "External credential setup  ${C_DIM}phase=$SECRETS_PHASE${C_RST}"
+  say "${C_DIM}Current state for every credential; values are never printed.${C_RST}"
+  cmd_secrets_status
+  say ""
+  say "${C_DIM}Only externally issued or provisioned values are prompted here."
+  say "Local generated values use: ./scripts/stack.sh secrets generate --phase $SECRETS_PHASE${C_RST}"
   count="$(cq '.credentials | length')"
   i=0
   while [ "$i" -lt "$count" ]; do
@@ -796,34 +811,28 @@ cmd_secrets_setup() {
     val="$(cq ".credentials[$i].value")"
     gen="$(cq ".credentials[$i].generate")"
     console="$(cq ".credentials[$i].console")"
+    input="$(credential_input_mode "$env" "$gen")"
     i=$((i + 1))
     credential_in_scope "$phase" || continue
     [ -z "$SECRETS_ONLY" ] || [ "$env" = "$SECRETS_ONLY" ] || continue
+    [ "$input" = "external" ] || continue
     any=1
     status="$(credential_status_word "$env" "$val")"
     say ""
     say "${C_B}$env${C_RST} — $name  [$status]"
     [ -z "$console" ] || say "  ${C_DIM}source: $console${C_RST}"
-    if [ -n "$gen" ]; then
-      printf '  [k]eep  [g]enerate  [e]nter  [c]lear  [s]kip: ' >&2
+    if [ -n "$val" ]; then
+      printf '  [k]eep  [e]replace  [c]lear: ' >&2
     else
-      printf '  [k]eep  [e]nter  [c]lear  [s]kip: ' >&2
+      printf '  [e]nter  [s]kip: ' >&2
     fi
     IFS= read -r action
-    [ -n "$action" ] || { [ -n "$val" ] && action=k || action=s; }
+    [ -n "$action" ] || { [ -n "$val" ] && action=k || action=e; }
     case "$action" in
       k|K|s|S) : ;;
       c|C)
         persist_credential_value "$env" ""
         ok "$env cleared" ;;
-      g|G)
-        [ -n "$gen" ] || { warn "$env has no generator"; continue; }
-        id="$(credential_generator_id "$gen")" || die "$env has an unsupported generator"
-        generate_credential_value "$id" || die "$env generation failed"
-        validate_credential_value "$env" "$GENERATED_VALUE" || die "$env generated invalid data"
-        persist_credential_value "$env" "$GENERATED_VALUE"
-        unset GENERATED_VALUE
-        ok "$env generated, stored, and validated" ;;
       e|E)
         while :; do
           prompt_secret_value "$env"
@@ -843,7 +852,7 @@ cmd_secrets_setup() {
     esac
     unset val
   done
-  [ "$any" -eq 1 ] || ok "Phase $SECRETS_PHASE requires no dedicated credentials"
+  [ "$any" -eq 1 ] || ok "Phase $SECRETS_PHASE has no external credential inputs"
   say ""
   cmd_secrets_status
   say "${C_DIM}next:${C_RST} ./scripts/stack.sh secrets write"

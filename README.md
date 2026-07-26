@@ -270,7 +270,7 @@ Each entry records more than the value — the console URL to get it, the scopes
 ```
 
 ```bash
-./scripts/stack.sh secrets setup           # select Phase 1..5
+./scripts/stack.sh secrets setup           # select a phase; enter external keys
 ./scripts/stack.sh secrets status --all    # no values printed
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # credentials.yaml -> .env
@@ -314,7 +314,8 @@ If a credential does leak, **revoke at the provider first** — rewriting histor
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup          # choose Phase 1..5
+./scripts/stack.sh secrets setup          # choose a phase; enter external keys
+./scripts/stack.sh secrets generate --phase 1  # optional local values
 ./scripts/stack.sh secrets write          # generate .env (mode 600)
 ./scripts/stack.sh doctor
 ```

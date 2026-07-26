@@ -31,7 +31,7 @@ overwritten**. Neither command prints secret values.
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # choose Phase 1..5 interactively
+./scripts/stack.sh secrets setup           # choose Phase 1..5; enter external keys
 ./scripts/stack.sh secrets status --all    # set / missing / invalid, no values
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # atomic .env write, mode 600
@@ -123,8 +123,10 @@ It also creates a real ordering problem. LiteLLM reads the Langfuse keys **at st
 ### What this means for a first run
 
 For **Phase 1** — the only phase that runs today — start with the phase-aware
-wizard. It shows which values are already set, generates local credentials,
-and accepts provider keys with hidden input and immediate format validation.
+wizard. It shows the state of every key, then accepts only externally issued
+or provisioned values with hidden input and immediate format validation.
+Local passwords and signing keys are a separate `secrets generate --phase 1`
+step, so generation never obscures the wizard's main purpose.
 
 Phases 2–4 add credentials, but the wizard and status commands can select one
 phase at a time, so later-phase values are never in your way early. Phase 5 is
@@ -153,14 +155,18 @@ stack.sh secrets setup [--phase 1..5] [--only ENV_NAME]
 
   for each credential in the selected phase:
     show set / missing / invalid without showing the value
-    show its source or provider console
-    offer keep / generate / hidden entry / clear / skip
-    validate before an entered or generated value is persisted
+    if externally issued or provisioned:
+      show its source or provider console
+      offer keep / hidden entry / clear / skip
+      validate before an entered value is persisted
+
+  locally generated and built-in default values are shown in status,
+  but are not prompted by this command
 ```
 
 The same primitives are also available independently: `secrets init` creates
-the private inventory, `secrets generate --phase N` fills locally generated
-entries without printing them, `secrets set NAME` accepts one hidden value,
+the private inventory, `secrets generate --phase N` is the explicitly separate
+helper for local values, `secrets set NAME` accepts one hidden external value,
 and `secrets status` / `secrets validate` are safe to use while screen-sharing.
 
 Langfuse project keys remain a two-pass item until its headless initialization
@@ -247,6 +253,7 @@ Each entry records more than a value — where to get it, what scopes it needs, 
 | `value` | The secret itself. Empty in the committed template |
 | `console` | Where to obtain or rotate it |
 | `generate` | Allowlisted generator ID, such as `hex-16`; never a shell command |
+| `input` | Optional setup behavior override; `default` skips built-in defaults |
 | `scopes` | Least-privilege grants this credential should have |
 | `phase` | Which build-out phase needs it |
 | `owner` / `rotates` | Accountability and cadence for audits |
