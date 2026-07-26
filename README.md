@@ -18,16 +18,36 @@ Enterprises adopting GenAI face the same set of questions:
 This repository is a **reference architecture + deployment scripts** that answers all three with open-source building blocks. Layers are fixed; implementations are swappable.
 
 ```
-┌─ UI ─────────────── LibreChat
-├─ Observability ──── Langfuse (backed by ClickHouse)
-├─ Gateway ────────── LiteLLM (unified routing, cost tracking)
-├─ Tools ──────────── MCP servers            (planned)
-├─ Serving ────────── vLLM
-├─ Models ─────────── Self-hosted (Qwen, EXAONE, ...) / OpenAI / Anthropic
-├─ Compute ────────── RunPod / AWS
-├─ Memory / Cache ─── MemKV                  (planned)
-└─ Storage ────────── MinIO                  (planned)
+┌─ UI ─────────────── LibreChat                        Phase 1
+├─ Observability ──── Langfuse (backed by ClickHouse)   Phase 1
+├─ Gateway ────────── LiteLLM (routing, cost tracking)  Phase 1
+├─ Models ─────────── OpenAI / Anthropic                Phase 1
+├─ Tools ──────────── MCP servers (ClickHouse Cloud)    Phase 2
+├─ Serving ────────── vLLM                              Phase 3
+├─ Models ─────────── Self-hosted (Qwen, EXAONE, ...)   Phase 3
+├─ Compute ────────── RunPod / AWS                      Phase 3
+├─ Storage ────────── MinIO                             Phase 4
+└─ Memory / Cache ─── MemKV                             Phase 4
 ```
+
+---
+
+## Build-out phases
+
+The stack is built **frontier-first**: get the gateway, tracing, and UI working against commercial APIs, then add tools, then self-hosting, then storage and memory. Each phase is a one-flag change — no config rewrite.
+
+| Phase | Scope | Adds | Status |
+|:--:|---|---|---|
+| **1** | **Frontier models** — LiteLLM + Langfuse + LibreChat against OpenAI and Anthropic. No GPU required. | `gateway`, `observability`, `ui` | 🚧 in progress |
+| **2** | **MCP tool layer** — MCP servers behind the gateway so tool calls are traced through the same pipeline. First target: ClickHouse Cloud. | `tools` | planned |
+| **3** | **Self-hosted serving** — vLLM on a RunPod GPU pod alongside the APIs, in one Langfuse project. | `serving`, `qwen-7b` | planned |
+| **4** | **Storage & memory** — MinIO for datasets/artifacts, MemKV for semantic caching. | `storage`, `memory` | planned |
+
+```bash
+./scripts/stack.sh phases      # which phase is current, and what each adds
+```
+
+Why this order: Phase 1 proves the *architecture* (unified gateway + gateway-level tracing) with zero infrastructure risk. Everything after it plugs into an already-working observability pipeline, so each new layer is validated against a known-good baseline instead of debugging two moving parts at once.
 
 ---
 
@@ -40,10 +60,10 @@ This repository is a **reference architecture + deployment scripts** that answer
                                │               │
                      Chat UI   │               │  Apps / SDKs
                                ▼               ▼
-                        ┌──────────┐    ┌─────────────────┐
+                        ┌──────────┐    ┌──────────────────┐
                         │ LibreChat│    │ OpenAI-compatible│
                         │  (UI)    │    │  client code     │
-                        └────┬─────┘    └───────┬─────────┘
+                        └────┬─────┘    └───────┬──────────┘
                              │                  │
                              ▼                  ▼
                    ┌─────────────────────────────────────┐
@@ -52,16 +72,21 @@ This repository is a **reference architecture + deployment scripts** that answer
                    │  • model routing / virtual keys     │
                    │  • cost tracking per model/team     │
                    │  • success/failure → Langfuse       │
-                   └───────┬──────────┬──────────┬───────┘
-                           │          │          │
-              self-hosted  │          │          │  commercial APIs
-                           ▼          ▼          ▼
-                  ┌────────────┐ ┌─────────┐ ┌───────────┐
-                  │ vLLM :8000 │ │ OpenAI  │ │ Anthropic │
-                  │ Qwen2.5-7B │ │  API    │ │    API    │
-                  │ on RunPod  │ └─────────┘ └───────────┘
-                  │  GPU pod   │
-                  └────────────┘
+                   └───┬────────┬─────────┬─────────┬────┘
+                       │        │         │         │
+          Phase 1 ─────┴──┐     │    ┌────┴─ Phase 1   Phase 2 ┐
+                          ▼     ▼    ▼                          ▼
+                  ┌─────────┐ ┌───────────┐            ┌──────────────┐
+                  │ OpenAI  │ │ Anthropic │            │  MCP servers │
+                  │  API    │ │    API    │            │  (ClickHouse │
+                  └─────────┘ └───────────┘            │    Cloud)    │
+                                                       └──────────────┘
+                       ┌────────────┐
+          Phase 3 ─────│ vLLM :8000 │
+                       │ Qwen2.5-7B │
+                       │ on RunPod  │
+                       │  GPU pod   │
+                       └────────────┘
 
                    All traffic (input/output, latency,
                    tokens, cost, errors) is traced to:
@@ -72,17 +97,17 @@ This repository is a **reference architecture + deployment scripts** that answer
                    │  evals · prompt management          │
                    │  ──────────────────────────────     │
                    │  ClickHouse (OLAP trace storage)    │
-                   │  Postgres (metadata) · Redis · S3   │
+                   │  Postgres (metadata) · Redis · MinIO│
                    └─────────────────────────────────────┘
 ```
 
 **A single request, end to end:**
 
-1. A user sends a message in LibreChat (or any OpenAI-compatible client) and selects a model — `qwen-7b`, `gpt-4o`, or `claude-sonnet`.
+1. A user sends a message in LibreChat (or any OpenAI-compatible client) and selects a model — `gpt-4o`, `claude-sonnet`, or (from Phase 3) `qwen-7b`.
 2. LiteLLM receives the request on one unified endpoint, resolves the model alias, and routes it:
-   - `qwen-7b` → vLLM on a RunPod GPU pod (self-hosted, OpenAI-compatible)
    - `gpt-4o` → OpenAI API
    - `claude-sonnet` → Anthropic API (format translation handled by LiteLLM)
+   - `qwen-7b` → vLLM on a RunPod GPU pod (self-hosted, OpenAI-compatible) *(Phase 3)*
 3. The response streams back to the user.
 4. LiteLLM's success/failure callbacks push the full trace — prompt, completion, latency, token counts, computed cost — into **Langfuse**, where ClickHouse stores and serves high-volume trace analytics.
 5. In the Langfuse UI you compare models side by side, build datasets from production traces, and score outputs.
@@ -91,31 +116,154 @@ This repository is a **reference architecture + deployment scripts** that answer
 
 ---
 
+## Configuration model
+
+One declarative file describes **what** the stack is. A script decides **where** it runs.
+
+```
+                    stack.yaml
+        (layers · models · phases · secrets refs)
+                        │
+                        │  ./scripts/stack.sh
+                        │
+        ┌───────────────┼────────────────┐
+        │               │                │
+        ▼               ▼                ▼
+  resolve layers    render model      pick target
+  → compose          catalog          → docker
+    profiles         → litellm_config   → aws-ec2
+                     → librechat.yaml
+```
+
+**`stack.yaml`** is the single source of truth: layers and their implementations, the model catalog, build-out phases, deployment targets, and the *names* of every secret. It never contains a secret value and never mentions a specific host.
+
+**`scripts/stack.sh`** resolves that config for a chosen `--target` and `--profile`, then renders the model catalog into the two configs that would otherwise duplicate it — LiteLLM's `model_list` and LibreChat's model picker. Add a model in one place, and the gateway and the UI both learn about it.
+
+`docker-compose.yml` stays hand-written and greppable; layer selection maps onto native **compose profiles**.
+
+### Commands
+
+```bash
+./scripts/stack.sh doctor                       # preflight: tooling, secrets, layers, models
+./scripts/stack.sh secrets write|gen|audit      # credential inventory -> .env, leak check
+./scripts/stack.sh phases                       # build-out phases and current status
+./scripts/stack.sh config                       # resolved stack for the selected target/profile
+./scripts/stack.sh models                       # model table with per-1k costs
+./scripts/stack.sh render                       # regenerate litellm_config.yaml + librechat.yaml
+./scripts/stack.sh up      --target docker      # render, then deploy
+./scripts/stack.sh status                       # curl every health check for active layers
+./scripts/stack.sh logs                         # follow compose logs
+./scripts/stack.sh down    [--purge]            # tear down (--purge also drops volumes)
+```
+
+Flags: `--target` · `--profile` · `--tf-var k=v` · `--all` · `--no-render` · `--dry-run` · `--file`
+
+### Profiles
+
+Profiles select which layers and models come up. The `phase-N` profiles are cumulative.
+
+| Profile | Layers | Models |
+|---|---|---|
+| `phase-1` *(default)* | gateway, observability, ui | `gpt-4o`, `claude-sonnet` |
+| `phase-2` | + tools | `gpt-4o`, `claude-sonnet` |
+| `phase-3` | + serving | + `qwen-7b` |
+| `phase-4` | + storage, memory | all |
+| `headless` | gateway, observability | all enabled |
+| `airgapped` | gateway, observability, ui, serving | `qwen-7b` only — no egress |
+
+```bash
+./scripts/stack.sh up --profile headless    # SDK demos, no chat UI
+./scripts/stack.sh up --profile airgapped   # no commercial API egress
+```
+
+Layer dependencies resolve transitively — asking for a layer brings up what it needs. Profiles that reference a not-yet-built layer warn and skip it rather than failing.
+
+---
+
 ## Repository layout
 
 ```
 .
-├── README.md
-├── .env.example                # all API keys & endpoints in one place
-├── docker/                     # Option 1 — single-node Docker Compose
-│   ├── docker-compose.yml      # LiteLLM + Langfuse (CH/PG/Redis/MinIO) + LibreChat
-│   ├── litellm_config.yaml
-│   └── librechat.yaml
-├── terraform/                  # Option 2 — AWS EC2 with Terraform
-│   ├── main.tf                 # VPC, EC2, security groups, EIP
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── user_data.sh            # cloud-init: docker compose bootstrap
-├── runpod/                     # GPU serving layer
-│   ├── deploy_vllm.md          # RunPod vLLM template guide
-│   └── start_vllm.sh           # manual pod bootstrap script
+├── stack.yaml                  # ★ single source of truth — layers, models, phases
+├── .env.example                # secret NAMES with per-phase grouping
+├── .gitignore                  # + .dockerignore, .cursorignore, .aiignore,
+│                               #   .aiexclude, .codeiumignore, .aiderignore,
+│                               #   .continueignore, .geminiignore, .codexignore
+├── .claude/settings.json       # denies Claude Code `Read` on secrets/
+├── secrets/                    # ★ credential inventory (contents ignored)
+│   ├── README.md               # setup, ignore coverage, leak response
+│   └── credentials.example.yaml # template — committed, value-free
 ├── scripts/
-│   ├── demo.py                 # 3-model comparison demo
-│   ├── healthcheck.sh          # verify all endpoints before a demo
-│   └── seed_traces.py          # generate sample traffic incl. one failure
+│   ├── stack.sh                # ★ control plane: doctor / render / up / down / status
+│   ├── demo.py                 # 3-model comparison demo              (todo)
+│   ├── healthcheck.sh          # superseded by `stack.sh status`      (todo)
+│   └── seed_traces.py          # sample traffic incl. one failure     (todo)
+├── docker/                     # Target 1 — single-node Docker Compose
+│   ├── docker-compose.yml      # LiteLLM + Langfuse + LibreChat       (todo)
+│   ├── litellm_config.yaml     # ⚙ RENDERED from stack.yaml
+│   └── librechat.yaml          # ⚙ RENDERED from stack.yaml
+├── terraform/                  # Target 2 — AWS EC2                   (todo)
+├── runpod/                     # Phase 3 — GPU serving layer          (todo)
 └── docs/
-    └── demo-flow.md            # 10-minute demo script
+    └── demo-flow.md            # 10-minute demo script               (todo)
 ```
+
+★ implemented · ⚙ generated, do not hand-edit · (todo) not scaffolded yet
+
+---
+
+## Credentials
+
+Every API key the stack touches — OpenAI, Anthropic, RunPod, AWS, ClickHouse Cloud, Langfuse, MinIO — is inventoried in **one** file: `secrets/credentials.yaml`. It is the only file you hand-edit; `.env` is generated from it.
+
+```
+secrets/credentials.yaml  ──secrets write──►  .env  ──►  compose / terraform
+      (you edit this)                     (generated, 0600)
+```
+
+Each entry records more than the value — the console URL to get it, the scopes it needs, the owner, and a rotation cadence:
+
+```yaml
+- name: ClickHouse Cloud user
+  phase: 2
+  env: CLICKHOUSE_CLOUD_USER
+  value: ""
+  console: https://clickhouse.cloud → service → Settings → Users
+  scopes: [SELECT]
+  notes: >-
+    Create a dedicated READ-ONLY user for the MCP server. An agent with a
+    tool has the user's full grants — do not reuse the admin account.
+  rotates: 90d
+```
+
+```bash
+./scripts/stack.sh secrets gen      # generate values for self-generated keys
+./scripts/stack.sh secrets write    # credentials.yaml -> .env (mode 600)
+./scripts/stack.sh secrets audit    # verify nothing can leak
+```
+
+### Ignore coverage
+
+`secrets/credentials.yaml` and `.env` are excluded from git, from Docker build contexts, and from every AI coding tool's index:
+
+| Tool | Mechanism | File |
+|---|---|---|
+| Git | ignore rules | `.gitignore` |
+| Docker | build-context exclusion | `.dockerignore` |
+| Claude Code | `permissions.deny` on `Read` | `.claude/settings.json` |
+| Cursor | ignore rules | `.cursorignore` |
+| JetBrains AI Assistant | ignore rules | `.aiignore` |
+| Gemini Code Assist | ignore rules | `.aiexclude`, `.geminiignore` |
+| Codeium / Windsurf | ignore rules | `.codeiumignore` |
+| Aider | ignore rules | `.aiderignore` |
+| Continue | ignore rules | `.continueignore` |
+| OpenAI Codex CLI | honours `.gitignore`; `.codexignore` as belt-and-braces | `.codexignore` |
+
+`secrets audit` verifies all of the above, plus that neither file is in the index **or anywhere in git history**, and that the committed template is still value-free. Run it before committing anything under `secrets/`.
+
+> **GitHub Copilot is the exception.** It has no repo-level ignore file — content exclusions are server-side, under *Settings → Copilot → Content exclusions*. Add `secrets/**`, `.env`, and `**/*.tfvars` there. Until you do, assume Copilot can see these files.
+
+If a credential does leak, **revoke at the provider first** — rewriting history is not containment. See [`secrets/README.md`](secrets/README.md).
 
 ---
 
@@ -123,40 +271,28 @@ This repository is a **reference architecture + deployment scripts** that answer
 
 ### Prerequisites
 
-- API keys (all optional except the ones you want to demo): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
-- A [RunPod](https://runpod.io) account for self-hosted GPU serving (or skip and use APIs only)
-- Docker ≥ 24 with Compose v2 (Option 1) / Terraform ≥ 1.7 + AWS credentials (Option 2)
+- `yq` (mikefarah v4) — `brew install yq`
+- Docker ≥ 24 with Compose v2 *(target: `docker`)*, or Terraform ≥ 1.7 + AWS credentials *(target: `aws-ec2`)*
+- API keys for the models you want: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
+
+`scripts/stack.sh` targets bash 3.2, so macOS system bash works with no upgrade.
 
 ```bash
-cp .env.example .env
-# fill in your keys
+cp secrets/credentials.example.yaml secrets/credentials.yaml
+./scripts/stack.sh secrets gen            # values for the self-generated keys
+$EDITOR secrets/credentials.yaml          # paste those + your provider keys
+./scripts/stack.sh secrets write          # generate .env (mode 600)
+./scripts/stack.sh doctor
 ```
 
-### Step 0 — Serving layer: vLLM on RunPod
+`doctor` only checks the secrets the selected profile actually needs — in Phase 1 it stays quiet about RunPod and MCP credentials. Use `--all` to see every phase.
 
-Deploy via RunPod's **vLLM Quick Deploy template** (recommended) or manually on any GPU pod:
+See [Credentials](#credentials) for the full inventory and how it stays out of git and AI tool indexes.
+
+### Target 1 — Docker on a laptop (single node)
 
 ```bash
-# on the pod (1× A40 / L40S is enough for a 7B model)
-pip install vllm
-vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000 --api-key ${VLLM_API_KEY}
-```
-
-Expose port 8000 through RunPod's HTTP proxy and note the endpoint:
-
-```
-https://<pod-id>-8000.proxy.runpod.net/v1
-```
-
-Put it into `.env` as `VLLM_API_BASE`. See [`runpod/deploy_vllm.md`](runpod/deploy_vllm.md) for details, model alternatives (EXAONE, EEVE for Korean workloads), and proxy timeout notes.
-
-### Option 1 — Docker on a laptop (single node)
-
-Everything except GPU serving runs locally in one compose stack:
-
-```bash
-cd docker
-docker compose up -d
+./scripts/stack.sh up --target docker --profile phase-1
 ```
 
 | Service | URL | Notes |
@@ -165,85 +301,69 @@ docker compose up -d
 | LiteLLM | http://localhost:4000 | unified gateway |
 | Langfuse | http://localhost:3000 | observability UI |
 | ClickHouse | localhost:8123 | Langfuse trace store |
-| MinIO | http://localhost:9001 | S3-compatible blob store for Langfuse |
+| MinIO | http://localhost:9001 | blob store backing Langfuse |
 
 First-time setup:
 
-1. Open Langfuse → create org/project → copy public & secret keys into `.env`
-2. `docker compose restart litellm` so callbacks pick up the keys
-3. Run the smoke test:
+1. Open Langfuse → create org/project → copy the public & secret keys into `.env`
+2. `./scripts/stack.sh up` again — LiteLLM restarts and picks up the callback keys
+3. Verify: `./scripts/stack.sh status`
 
-```bash
-./scripts/healthcheck.sh
-python scripts/demo.py        # sends prompts to all three models
-```
+Open Langfuse — you should see traces for `gpt-4o` and `claude-sonnet` in one project.
 
-Open Langfuse — you should see traces for `qwen-7b`, `gpt-4o`, and `claude-sonnet` in one project.
-
-### Option 2 — AWS EC2 with Terraform
+### Target 2 — AWS EC2 with Terraform
 
 Provisions a single EC2 instance (default `t3.xlarge`, gp3 volume), security groups, and an Elastic IP, then bootstraps the same compose stack via cloud-init:
 
 ```bash
-cd terraform
-terraform init
-terraform apply \
-  -var="key_name=<your-keypair>" \
-  -var="allowed_cidr=<your-ip>/32"
+./scripts/stack.sh up --target aws-ec2 \
+  --tf-var key_name=<your-keypair> \
+  --tf-var allowed_cidr=<your-ip>/32
 ```
 
-Outputs the public endpoints:
-
-```
-librechat_url = http://<eip>:3080
-litellm_url   = http://<eip>:4000
-langfuse_url  = http://<eip>:3000
-```
+Instance type, volume size, and region come from `targets.aws-ec2.vars` in `stack.yaml`; `--tf-var` overrides or adds. The host for `status` and `urls` is read from the `public_ip` terraform output, so no IP is ever hard-coded.
 
 Notes:
 
-- The security group restricts inbound to `allowed_cidr` — do not open to `0.0.0.0/0` for a demo stack with real API keys.
-- For production hardening: put an ALB + ACM cert in front, move Postgres to RDS, ClickHouse to ClickHouse Cloud, and secrets to SSM Parameter Store.
-- `terraform destroy` tears everything down; RunPod pods are billed separately — stop them in the RunPod console.
+- The security group restricts inbound to `allowed_cidr` — **do not** open to `0.0.0.0/0` for a demo stack holding real API keys.
+- For production hardening: ALB + ACM cert in front, Postgres → RDS, ClickHouse → ClickHouse Cloud, secrets → SSM Parameter Store.
+- `./scripts/stack.sh down --target aws-ec2` runs `terraform destroy`. From Phase 3 on, RunPod pods are billed separately — stop them in the RunPod console.
 
-### Gateway configuration (both options)
+### Adding a model
 
-`docker/litellm_config.yaml`:
+Add one entry to `models:` in `stack.yaml`, then re-render. Both LiteLLM and the LibreChat picker update together:
 
 ```yaml
-model_list:
-  # 1. Self-hosted (RunPod vLLM)
-  - model_name: qwen-7b
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-7B-Instruct
-      api_base: os.environ/VLLM_API_BASE
-      api_key: os.environ/VLLM_API_KEY
-
-  # 2. OpenAI
-  - model_name: gpt-4o
-    litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-
-  # 3. Anthropic
-  - model_name: claude-sonnet
-    litellm_params:
-      model: anthropic/claude-sonnet-4-5
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-litellm_settings:
-  success_callback: ["langfuse"]
-  failure_callback: ["langfuse"]
+- alias: gpt-4o-mini
+  phase: 1
+  enabled: true
+  tier: commercial
+  provider: openai
+  litellm_model: openai/gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  context_window: 128000
+  cost_per_1k: { input: 0.00015, output: 0.0006 }
+  ui:
+    label: GPT-4o mini
+    description: Cheap, fast baseline for cost comparisons.
 ```
 
-Client code is identical for every model:
+```bash
+./scripts/stack.sh render && ./scripts/stack.sh up
+```
+
+Costs are written per **1,000 tokens** for readability; the renderer converts them to LiteLLM's per-token fields so Langfuse cost attribution is correct.
+
+### Client code
+
+Identical for every model, in every phase:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:4000", api_key="sk-litellm-master")
 
-for m in ["qwen-7b", "gpt-4o", "claude-sonnet"]:
+for m in ["gpt-4o", "claude-sonnet"]:          # add "qwen-7b" from Phase 3
     r = client.chat.completions.create(
         model=m,
         messages=[{"role": "user", "content": "Explain ClickHouse in one sentence."}],
@@ -253,14 +373,44 @@ for m in ["qwen-7b", "gpt-4o", "claude-sonnet"]:
 
 ---
 
+## Phase 3 — vLLM on RunPod
+
+Not required to run the stack today. When Phase 3 starts, deploy via RunPod's **vLLM Quick Deploy template** (recommended) or manually on any GPU pod:
+
+```bash
+# on the pod (1× A40 / L40S is enough for a 7B model)
+pip install vllm
+vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000 --api-key ${VLLM_API_KEY}
+```
+
+Expose port 8000 through RunPod's HTTP proxy and put the endpoint in `.env` as `VLLM_API_BASE` (note the `/v1` suffix):
+
+```
+https://<pod-id>-8000.proxy.runpod.net/v1
+```
+
+Then switch profile — no config rewrite:
+
+```bash
+./scripts/stack.sh up --profile phase-3
+```
+
+`stack.yaml` also declares a `qwen-7b → gpt-4o` fallback, so a cold or stopped pod degrades to an API model instead of erroring. The renderer prunes that fallback automatically when the target model isn't in the active profile (e.g. under `airgapped`).
+
+Model alternatives for Korean workloads are listed under `layers.serving.options.alternatives` (EXAONE-3.5, EEVE-Korean).
+
+---
+
 ## Demo flow (10 minutes)
 
-1. **Serving** — show the RunPod pod running vLLM: *your model, your infra, live in minutes.*
-2. **Traffic** — run `scripts/seed_traces.py` (or chat in LibreChat): 3–4 prompts across all three models, including one long generation and one deliberate failure so error traces appear.
+1. **Config** — `./scripts/stack.sh config` and `phases`: one file describes the stack, the script picks the target. *Layers are fixed; implementations are swappable.*
+2. **Traffic** — chat in LibreChat across both models, including one long generation and one deliberate failure so error traces appear.
 3. **Observability** — open Langfuse: traces → latency/token/cost comparison per model → sessions → create a dataset from a trace and score one output.
 4. **Close** — Langfuse v3 runs on ClickHouse; at production trace volumes this is exactly the high-cardinality OLAP workload it was built for.
 
-Full script with talking points: [`docs/demo-flow.md`](docs/demo-flow.md).
+From Phase 3, open with the RunPod pod running vLLM: *your model, your infra, live in minutes.*
+
+Full script with talking points: [`docs/demo-flow.md`](docs/demo-flow.md) *(todo)*.
 
 ---
 
@@ -268,42 +418,55 @@ Full script with talking points: [`docs/demo-flow.md`](docs/demo-flow.md).
 
 **Deployment & operations**
 
-- **Ease of deployment** — vLLM template on RunPod is live in minutes vs. EC2 GPU setup (AMI, drivers, networking); the rest of the stack is one `docker compose up` or one `terraform apply`.
+- **Config-driven deployment** — one `stack.yaml` plus one script covers laptop and cloud; the deployment target is a flag, not a fork in the config tree.
+- **Ease of deployment** — vLLM template on RunPod is live in minutes vs. EC2 GPU setup (AMI, drivers, networking); the rest is one `stack.sh up`.
 - **Fast cold-start** — RunPod pods spin up in seconds (FlashBoot for serverless) vs. minutes-long cloud GPU provisioning.
 - **Cost efficiency** — per-second GPU billing with zero idle cost when stopped; typically 2–3× cheaper than on-demand cloud GPU pricing. LiteLLM cost tracking makes self-hosted vs. API economics directly comparable in Langfuse.
 
 **Architecture**
 
 - **Unified gateway** — one OpenAI-compatible endpoint in front of self-hosted and commercial models; applications never change when models do.
-- **Framework-neutral observability** — tracing lives at the gateway, so raw SDKs, LangChain, LlamaIndex, and future MCP-based agents are all captured identically with zero app-code changes.
+- **Framework-neutral observability** — tracing lives at the gateway, so raw SDKs, LangChain, LlamaIndex, and MCP-based agents are all captured identically with zero app-code changes.
 - **Composability** — every layer is swappable: vLLM → SGLang/TGI, RunPod → AWS/on-prem GPU, LibreChat → your own app, without touching the rest of the stack.
+- **Incremental adoption, proven** — the phase profiles are the argument: the same config carries you from APIs-only to fully self-hosted without a rewrite.
 
 **Enterprise fit**
 
-- **Sovereignty & compliance** — the full path (UI → gateway → model → traces) can run inside your own network boundary; relevant to regulated and air-gapped environments (e.g. Korean 망분리 / ISMS-P contexts).
-- **Gradual adoption** — start with commercial APIs, add self-hosted models later (or vice versa) behind the same gateway, with one observability pane throughout.
+- **Sovereignty & compliance** — the full path (UI → gateway → model → traces) can run inside your own network boundary; relevant to regulated and air-gapped environments (e.g. Korean 망분리 / ISMS-P contexts). `--profile airgapped` enforces no commercial API egress.
+- **Gradual adoption** — start with commercial APIs, add self-hosted models later behind the same gateway, with one observability pane throughout.
 - **Scale story** — Langfuse's ClickHouse backend handles production-scale trace volume; the same architecture extends from a laptop demo to millions of traces per day.
 
 ---
 
 ## Roadmap
 
-- [ ] **MCP tool layer** — expose enterprise tools to agents via MCP servers, traced through the same pipeline
-- [ ] **MinIO storage layer** — datasets, artifacts, and model weights on S3-compatible object storage
-- [ ] **MemKV memory/cache layer** — semantic caching and conversation memory
+Tracked as phases in [`stack.yaml`](stack.yaml) — see `./scripts/stack.sh phases`.
+
+- [ ] **Phase 1** — `docker-compose.yml`, `demo.py`, `seed_traces.py`, `docs/demo-flow.md`
+- [ ] **Phase 2** — MCP tool layer; ClickHouse Cloud server first, traced through the same pipeline
+- [ ] **Phase 3** — RunPod vLLM serving; `runpod/deploy_vllm.md`, `terraform/`
+- [ ] **Phase 4** — MinIO artifact storage, MemKV semantic cache
 - [ ] **Agent demo** — a multi-step agent (tool-use loop) producing nested traces in Langfuse
 - [ ] **Eval pipeline** — LLM-as-judge scoring on Langfuse datasets, scheduled
-- [ ] **Kubernetes profile** — Helm-based deployment for production environments
+- [ ] **Kubernetes target** — Helm profile (`targets.k8s`, currently `enabled: false`)
 
 ---
 
 ## FAQ
 
+**Why frontier models before self-hosting?** Phase 1 validates the architecture — unified gateway, gateway-level tracing, cost attribution — with no GPU, no drivers, no cold-start latency. Once traces are flowing, adding vLLM is a one-flag change against a known-good baseline instead of debugging two new systems at once.
+
 **Do I need LangChain?** No. Observability is captured at the gateway (LiteLLM → Langfuse callbacks), so this works with any client. LangChain/LangGraph apps are also traced automatically if you use them.
 
-**Can I skip RunPod?** Yes — comment out the `qwen-7b` entry and demo with OpenAI/Anthropic only. Or point `VLLM_API_BASE` at any OpenAI-compatible endpoint (on-prem vLLM, AWS EC2 GPU, SGLang).
+**Can I skip RunPod entirely?** Yes — that's the Phase 1 default. Or point `VLLM_API_BASE` at any OpenAI-compatible endpoint (on-prem vLLM, EC2 GPU, SGLang) and use `--profile phase-3`.
 
-**Can I self-host Langfuse fully air-gapped?** Yes — Option 1's compose stack has no external dependencies beyond the model endpoints you configure.
+**Why is `yq` required?** `stack.sh` reads `stack.yaml` and renders the model catalog into LiteLLM and LibreChat configs. `brew install yq` — mikefarah v4; the script refuses other implementations.
+
+**Can I hand-edit the rendered configs?** No — `render` overwrites them, and `up` renders by default. Edit `stack.yaml` instead. Use `--no-render` if you need a one-off manual override.
+
+**Where do API keys live?** One file — `secrets/credentials.yaml`, generated from `secrets/credentials.example.yaml`. `.env` is derived from it via `./scripts/stack.sh secrets write` and should never be hand-edited. Both are ignored by git, Docker, and every AI coding tool listed under [Credentials](#credentials); `secrets audit` proves it.
+
+**Can I self-host Langfuse fully air-gapped?** Yes — the compose stack has no external dependencies beyond the model endpoints you configure. `--profile airgapped` drops the commercial API models entirely.
 
 ## License
 
