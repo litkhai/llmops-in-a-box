@@ -8,8 +8,7 @@ build context, or an AI coding tool's index.
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # external keys only
-./scripts/stack.sh secrets generate --phase 1  # internal demo values
+./scripts/stack.sh secrets setup           # d=default credentials, g=generate, w=write
 ./scripts/stack.sh secrets status --all    # values are never printed
 ./scripts/stack.sh secrets validate --all  # offline format checks
 ./scripts/stack.sh secrets write           # atomic .env write, mode 600
@@ -34,11 +33,19 @@ Operate on one phase or one credential when needed:
 ./scripts/stack.sh secrets validate --phase 1
 ```
 
-`secrets setup` is dedicated to values issued by external services and never
-changes internal credentials. `secrets generate` creates the internal demo
-values without printing them; existing values are preserved unless `--force`
-is supplied. Entered values are validated before storage. Phase 5 currently
-has no dedicated credentials.
+`secrets setup` is the unified setup hub. It groups the complete inventory by
+technology, hides external secret input, accepts visible configuration values,
+generates individual internal credentials, and offers `g` to generate every
+missing internal value. Use `d` to set a default ID, email, and password:
+LiteLLM receives the ID, Langfuse receives the email, and local databases and
+object stores receive the compatible account fields;
+cryptographic and external keys remain unique. This is a demo convenience;
+prefer unique service passwords in production. Use `w` in the same menu to
+write `.env`. The separate
+`secrets generate` and `secrets write` commands remain available for
+automation. Existing generated values are preserved unless `--force` is
+supplied to `secrets generate`. Configured values remain hidden by default;
+select an item and use `c` to copy it or `r` to reveal it after confirmation.
 
 ## Verifying the ignore coverage
 

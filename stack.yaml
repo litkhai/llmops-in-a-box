@@ -557,9 +557,15 @@ secrets:
       # account, and someone has to register through the UI on first visit —
       # which is the manual step the whole approach exists to remove.
       - LANGFUSE_INIT_USER_EMAIL
+      - LANGFUSE_INIT_USER_NAME
       - LANGFUSE_INIT_USER_PASSWORD
+      - UI_USERNAME
+      - UI_PASSWORD
+      - CLICKHOUSE_USER
       - CLICKHOUSE_PASSWORD
+      - POSTGRES_USER
       - POSTGRES_PASSWORD
+      - MINIO_ROOT_USER
       - MINIO_ROOT_PASSWORD
       - LIBRECHAT_CREDS_KEY
       - LIBRECHAT_CREDS_IV

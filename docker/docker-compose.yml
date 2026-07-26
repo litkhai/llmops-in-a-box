@@ -34,7 +34,7 @@ name: sais
 x-langfuse-env: &langfuse-env
   # Shared by web and worker: both talk to all four backends, and Langfuse
   # requires the values to agree between them.
-  DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — run ./scripts/stack.sh secrets gen}@postgres:5432/postgres
+  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — run ./scripts/stack.sh secrets gen}@postgres:5432/postgres
   SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT is required — run ./scripts/stack.sh secrets gen}
   # 256-bit hex. `openssl rand -hex 32`. Encrypts stored provider credentials
   # and API keys inside Langfuse, so losing it makes existing rows unreadable.
@@ -102,19 +102,19 @@ services:
     profiles: [obs]
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: postgres
     # Not published. Nothing outside the compose network needs it, and 5432 is
     # one of the most likely ports on a developer machine to be already taken.
-    # `docker compose exec postgres psql -U postgres` when you need a shell.
+    # `docker compose exec postgres psql -U "$POSTGRES_USER"` when you need a shell.
     volumes:
       - postgres-data:/var/lib/postgresql/data
       # Creates the separate `litellm` database on first init. Only runs when
       # the volume is empty — see docker/postgres-init/01-litellm-db.sql.
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -308,11 +308,13 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required — run ./scripts/stack.sh secrets gen}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?LITELLM_SALT_KEY is required — run ./scripts/stack.sh secrets gen}
+      UI_USERNAME: ${UI_USERNAME:-admin}
+      UI_PASSWORD: ${UI_PASSWORD:?UI_PASSWORD is required — run ./scripts/stack.sh secrets setup}
       # Without a database LiteLLM still proxies, but virtual keys and the
       # declared budget cap (layers.gateway.options.budget) are not persisted
       # or enforced. Separate database on the same server; created by
       # postgres-init on first boot.
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/litellm
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/litellm
       STORE_MODEL_IN_DB: ${LITELLM_STORE_MODEL_IN_DB:-True}
 
       # Provider keys. Deliberately NOT `:?` — a missing provider key should

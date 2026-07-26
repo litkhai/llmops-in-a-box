@@ -31,10 +31,9 @@ overwritten**. Neither command prints secret values.
 
 ```bash
 ./scripts/stack.sh secrets init
-./scripts/stack.sh secrets setup           # all external keys, grouped by phase
+./scripts/stack.sh secrets setup           # d=default credentials, g=generate, w=write
 ./scripts/stack.sh secrets status --all    # set / missing / invalid, no values
 ./scripts/stack.sh secrets validate --all  # offline format checks
-./scripts/stack.sh secrets write           # atomic .env write, mode 600
 ./scripts/stack.sh doctor
 ```
 
@@ -131,24 +130,45 @@ wizard generates the project key pair as internal demo defaults.
 
 ### What this means for a first run
 
-For **Phase 1** — the only phase that runs today — start with the phase-aware
-wizard. It shows the state of every key, then accepts only externally issued
-or provisioned values with hidden input and immediate format validation.
-The wizard never creates or changes internal credentials. Local passwords,
-signing keys, and self-hosted Langfuse project keys are handled separately by
-`secrets generate --phase 1`.
+Start with the unified setup hub. It shows the complete inventory in technology
+groups: model providers, LiteLLM, Langfuse, Redis, ClickHouse, PostgreSQL,
+MinIO, LibreChat, the MCP layer, self-hosted serving, AWS, and artifact storage.
+Selecting a group shows each value's input type and state.
 
-The wizard opens directly on a two-level menu. The top level contains
-**AWS authentication** followed by the workload phase groups. Users deploying
-only with Docker can simply ignore the AWS group; choosing a deployment target
-is a concern of `stack.sh up`, not credential entry. Selecting a group opens its
-credentials, and `b` returns to the group menu after any action. Phases that add
-no external credentials are omitted.
+- `external` values use hidden input and immediate format validation.
+- `config` and `default` values use visible input.
+- `generated` values can be generated individually without being printed.
+- `d` runs **Set default credentials**. It asks for ID, email, and password
+  only when the current selection contains a compatible target.
+- `g` generates every missing internal value across the stack.
+- `w` validates the inventory and writes `.env` atomically with mode `600`.
+- On a configured value, `c` copies it to the system clipboard and `r` reveals
+  it only after an explicit terminal-scrollback warning.
+
+`b` returns to the technology menu after any action. `--phase N` and
+`--only ENV_NAME` remain available as filters for focused work.
 
 The AWS group accepts either an `AWS_PROFILE` for SSO or both halves of a
 static key pair. Its status reports the selected method instead of treating all
-three fields as required. It remains visible with `--phase N`, because AWS
-authentication is independent of the workload phase.
+three fields as required.
+
+The default-credential mapping is semantic rather than positional:
+
+| Default field | Technology fields |
+|---|---|
+| ID | LiteLLM `UI_USERNAME`, PostgreSQL, local ClickHouse, both MinIO users |
+| Email | Langfuse `LANGFUSE_INIT_USER_EMAIL` |
+| Password | LiteLLM and Langfuse login passwords plus compatible local service passwords |
+
+Langfuse's optional display name remains independently editable. The shortcut
+does not reuse the password for API keys, LiteLLM gateway keys, JWT/signing
+secrets, encryption keys, or externally issued credentials.
+
+Use the shortcut before the first stack startup. Once a persistent database or
+object-store volume exists, changing only `.env` does not rotate the account
+inside that service; coordinate an in-service rotation or recreate disposable
+demo volumes. A shared password is convenient for a local demo but expands the
+blast radius of one leak, so use unique service passwords for production.
 
 ---
 
@@ -171,24 +191,24 @@ So the classification is not documentation — it is the control flow.
 ```
 stack.sh secrets setup [--phase 1..5] [--only ENV_NAME]
 
-  show a numbered menu of credential groups
-  keep AWS authentication optional and separate from workload phases
-  select a group, then a credential to enter, replace, or clear
+  load the complete inventory once
+  show a numbered menu grouped by technology
+  select one value to input, generate, replace, or clear
+  configured values offer explicit copy or reveal actions
   return to the group after each action; b returns to the main menu
-  omit phases that have no external credentials
+  d maps validated default ID/email/password fields to compatible technologies
+  g generates all missing internal values
+  w validates and atomically writes .env
   press q or Enter to finish
   validate before an entered value is persisted
-
-  generated values and non-secret config such as URLs, hosts, and regions
-  are omitted from this wizard
 ```
 
 The same primitives are also available independently: `secrets init` creates
 and synchronizes the private inventory, `secrets generate --phase N` explicitly
 fills or regenerates local values, `secrets set NAME` accepts one hidden
 external value, and `secrets status` / `secrets validate` are safe to use while
-screen-sharing. Unlike the external-only wizard, `secrets status` shows the
-complete inventory.
+screen-sharing. `secrets write` remains available for non-interactive
+automation.
 
 Langfuse project keys are now included in the automatically generated demo
 defaults and wired into the Phase 1 Compose headless initialization.
