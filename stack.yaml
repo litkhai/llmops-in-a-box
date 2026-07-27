@@ -20,8 +20,11 @@
 schema: 1
 
 project:
-  name: sovereign-ai-stack
-  slug: sais                    # prefix for container / cloud resource names
+  name: llmops-in-a-box
+  slug: sais                    # compose project name (-p) and cloud resource
+                                # prefix. Not derived from `name`, and changing
+                                # it renames every container, network, and
+                                # volume — existing local data is orphaned.
   environment: demo             # demo | staging | prod
   owner: ken.lee@clickhouse.com
 
@@ -44,7 +47,7 @@ phases:
     adds_models: [gpt-4o, claude-sonnet]
   2:
     name: MCP tool layer
-    status: planned
+    status: not_built
     scope: >-
       MCP servers exposed to the gateway so tool-use is traced through the
       same pipeline. First server is ClickHouse Cloud — settled, not a
@@ -53,7 +56,7 @@ phases:
     adds_models: []
   3:
     name: Self-hosted serving
-    status: planned
+    status: not_built
     scope: >-
       vLLM on a RunPod GPU pod behind the same gateway, so self-hosted and
       commercial models sit side by side in one Langfuse project.
@@ -61,7 +64,7 @@ phases:
     adds_models: [qwen-7b]
   4:
     name: Storage and large context
-    status: planned
+    status: not_built
     scope: >-
       A MinIO AIStor instance for datasets, eval artifacts and model weights,
       separate from the blob store Langfuse runs for its own event uploads.
@@ -77,7 +80,7 @@ phases:
   # definition below for why MemKV cannot be a container in this stack.
   5:
     name: Operating recipes
-    status: planned
+    status: not_built
     scope: >-
       No new layers. Context-based routing in LiteLLM, LibreChat Agents over
       the Phase 2 MCP tools, and Langfuse evaluations — the things worth

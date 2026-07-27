@@ -104,7 +104,8 @@ Then hand back to the phases: *this is Phase 1. The same config adds tools, self
 
 ## Variation — from Phase 3
 
-This variation is planned; it is not part of the current runnable demo.
+This variation arrives with Phase 3. It is not part of the current runnable
+demo.
 
 Open with the serving layer instead, then follow the same arc:
 

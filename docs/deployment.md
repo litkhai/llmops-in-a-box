@@ -93,9 +93,9 @@ stack holding provider keys through `0.0.0.0/0`.
 
 ## External vLLM serving
 
-Phase 3 is planned and is not required for the current demo. The design treats
-vLLM as an externally managed OpenAI-compatible endpoint rather than a local
-Compose service. When implemented, it will require:
+Phase 3 is not built yet and is not required for the current demo. The design
+treats vLLM as an externally managed OpenAI-compatible endpoint rather than a
+local Compose service. When implemented, it will require:
 
 - a live `VLLM_API_BASE` ending in `/v1`
 - a `VLLM_API_KEY`

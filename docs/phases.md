@@ -1,32 +1,56 @@
 # Build-out phases
 
-The stack is built frontier-first: establish one gateway and one trace pipeline
+The phases are a build order, not a menu. Every layer on this page is in scope
+and intended to ship; what changes from one phase to the next is which layer is
+being built, not whether it will exist. The Status column reports implementation
+state, not scope.
+
+## The end state
+
+When the build-out is complete, one `stack.yaml` describes a stack in which:
+
+- every request enters through one OpenAI-compatible gateway, whichever model
+  serves it
+- models are served inside the network boundary, with commercial APIs as an
+  optional addition rather than a dependency
+- agents reach private data through declared, scoped MCP servers instead of
+  through code embedded in an application
+- datasets, eval artifacts, and model weights live in an object store the
+  operator owns
+- a long shared prompt prefix is prefilled once and reused instead of
+  recomputed on every request
+- routing, guardrails, and evaluation are configured at the gateway, so they
+  apply to every client at once
+
+`--profile airgapped` is the acceptance test for the whole arc: it must resolve
+to a working stack with no commercial model and no commercial fallback anywhere
+in the generated config. It cannot pass today, because there is no self-hosted
+model for it to fall back to. Phase 3 is what makes it pass.
+
+## Order and current state
+
+The order is frontier-first: establish one gateway and one trace pipeline
 against commercial APIs, then add tools, self-hosted serving, storage, and
-operating recipes. Phase profiles are cumulative.
+operating recipes. Phase 1 proves the gateway, provider abstraction, tracing,
+and cost attribution without introducing GPU provisioning, so every later layer
+plugs into a request and observability path that already works. Phase profiles
+are cumulative.
 
 ```bash
 ./scripts/stack.sh phases
 ```
 
-## Current status
-
 | Phase | Outcome | Status |
 |:--:|---|---|
 | 1 | Frontier models through LiteLLM, traced in Langfuse | **In progress; Docker runnable** |
-| 2 | MCP tool layer | Planned |
-| 3 | Self-hosted vLLM serving | Planned |
-| 4 | Artifact storage and KV-cache reuse | Planned |
-| 5 | Routing, agents, evaluations, and guardrails | Planned |
+| 2 | MCP tool layer | Not built yet |
+| 3 | Self-hosted vLLM serving | Not built yet |
+| 4 | Artifact storage and KV-cache reuse | Not built yet |
+| 5 | Routing, agents, evaluations, and guardrails | Not built yet |
 
-The AWS and Kubernetes deployment artifacts are also not implemented. A
-profile can describe planned layers before those layers are runnable;
-`stack.sh` warns and skips disabled layers.
-
-## Why this order
-
-Phase 1 proves the gateway, provider abstraction, tracing, and cost attribution
-without introducing GPU provisioning. Later layers can then be tested against
-a known-good request and observability path.
+The AWS and Kubernetes deployment artifacts are not implemented either. A
+profile can describe a layer before that layer is runnable; `stack.sh` warns and
+skips disabled layers.
 
 ## Phase 1 — Frontier models
 

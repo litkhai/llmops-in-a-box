@@ -26,24 +26,134 @@ LiteLLM · LibreChat · Langfuse · ClickHouse · OpenAI · Anthropic
 
 ---
 
+## Why this exists
+
+Enterprises adopting GenAI face the same three questions:
+
+<div class="grid cards" markdown>
+
+-   :material-server-network: **Can we run our own models on our own infrastructure?**
+
+    Data residency, network isolation, regulatory compliance.
+
+-   :material-swap-horizontal: **Can we mix self-hosted models with commercial APIs?**
+
+    OpenAI and Anthropic alongside our own models — without rewriting applications.
+
+-   :material-chart-line: **Can we see everything in one place?**
+
+    Every prompt, latency, token, cost, and failure.
+
+</div>
+
+This is a **reference architecture plus deployment scripts** that answers all
+three with open-source building blocks. Layers are fixed; implementations are
+swappable.
+
+---
+
+## The full picture
+
+This is the architecture the stack is being built toward, with the phase that
+delivers each path. The phases are a build order, not a menu — every layer shown
+here is in scope. Today only the <span class="phase phase-1">Phase 1</span>
+paths run.
+
+```mermaid
+flowchart TB
+    U1["End users<br/><small>chat</small>"]
+    U2["Apps / SDKs<br/><small>OpenAI-compatible</small>"]
+
+    LC["<b>LibreChat</b><br/><small>:3080 · UI</small>"]
+    GW["<b>LiteLLM Gateway</b><br/><small>:4000</small><br/><small>routing · virtual keys · cost tracking</small>"]
+
+    OA["OpenAI API"]
+    AN["Anthropic API"]
+    MCP["MCP servers<br/><small>ClickHouse Cloud</small>"]
+    VL["vLLM :8000<br/><small>Qwen2.5-7B on RunPod</small>"]
+
+    LF["<b>Langfuse</b><br/><small>:3000 · traces · sessions<br/>datasets · evals</small>"]
+    CH[("ClickHouse<br/><small>OLAP traces</small>")]
+    PG[("Postgres")]
+    RD[("Redis")]
+    MI[("MinIO")]
+    ST[("MinIO AIStor<br/><small>datasets · artifacts<br/>weights · KV cache</small>")]
+
+    U1 --> LC --> GW
+    U2 --> GW
+
+    GW -->|Phase 1| OA
+    GW -->|Phase 1| AN
+    GW -->|Phase 2| MCP
+    GW -->|Phase 3| VL
+    VL -.->|Phase 4| ST
+
+    GW -.->|"traces: prompt, tokens,<br/>latency, cost, errors"| LF
+    LF --- CH
+    LF --- PG
+    LF --- RD
+    LF --- MI
+
+    classDef p1 fill:#1a7f37,stroke:#1a7f37,color:#fff
+    classDef p2 fill:#8250df,stroke:#8250df,color:#fff
+    classDef p3 fill:#bf8700,stroke:#bf8700,color:#fff
+    classDef p4 fill:#2563c9,stroke:#2563c9,color:#fff
+    classDef obs fill:#0969da,stroke:#0969da,color:#fff
+    class OA,AN p1
+    class MCP p2
+    class VL p3
+    class ST p4
+    class LF obs
+```
+
+The two MinIO instances are deliberate. Langfuse runs one for its own blobs;
+AIStor is a separate store you own, so your dataset and artifact lifecycle is
+not coupled to another product's schema and retention.
+
+### The layers
+
+| Layer | Implementation | Phase |
+|---|---|:--:|
+| UI | LibreChat | <span class="phase phase-1">1</span> |
+| Observability | Langfuse (ClickHouse · Postgres · Redis · MinIO) | <span class="phase phase-1">1</span> |
+| Gateway | LiteLLM — routing, virtual keys, cost tracking | <span class="phase phase-1">1</span> |
+| Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
+| Tools | MCP servers (ClickHouse Cloud first) | <span class="phase phase-2">2</span> |
+| Serving | vLLM | <span class="phase phase-3">3</span> |
+| Models | Self-hosted — Qwen, EXAONE, EEVE | <span class="phase phase-3">3</span> |
+| Compute | RunPod · AWS | <span class="phase phase-3">3</span> |
+| Storage | MinIO AIStor — datasets, artifacts, weights | <span class="phase phase-4">4</span> |
+| KV cache | LMCache — prefill a long shared prefix once, reuse it | <span class="phase phase-4">4a</span> |
+| *(recipes)* | Context routing · LibreChat Agents · Langfuse evals — no new layer | <span class="phase phase-5">5</span> |
+
+The layer list is the invariant. Which implementation fills a row is a
+configuration decision in `stack.yaml`, which is why the phases can add rows
+without rewriting the ones already there.
+
+### A single request, end to end
+
+1. A user sends a message in LibreChat (or any OpenAI-compatible client) and
+   picks a model — `gpt-4o`, `claude-sonnet`, or from Phase 3, `qwen-7b`.
+2. LiteLLM receives it on **one unified endpoint**, resolves the model alias,
+   and routes it to the right provider. Anthropic's format translation is
+   handled for you.
+3. The response streams back.
+4. LiteLLM's success and failure callbacks push the full trace — prompt,
+   completion, latency, token counts, computed cost — into **Langfuse**, where
+   ClickHouse stores and serves high-volume trace analytics.
+5. In Langfuse you compare models side by side, build datasets from production
+   traces, and score outputs.
+
+!!! tip "Zero application code changes"
+    Observability lives at the **gateway** layer, not in your app. Raw SDKs,
+    LangChain, LlamaIndex, and future MCP-based agents are all traced
+    identically — nothing to instrument.
+
+---
+
 ## What runs today
 
-Phase 1 runs on Docker Compose:
-
-- LiteLLM provides one OpenAI-compatible gateway.
-- LibreChat provides the model picker and chat UI.
-- OpenAI and Anthropic provide model inference.
-- Langfuse records traces, tokens, latency, cost, and failures.
-- ClickHouse, Postgres, Redis, MinIO, and MongoDB support the application
-  services.
-
-At least one external model-provider key is required. Phase 1 sends model
-requests outside the local network and is not an air-gapped deployment.
-
-AWS EC2, Kubernetes, MCP tools, self-hosted vLLM, artifact storage, and
-operating recipes remain planned. The docs label them accordingly.
-
-## Request path
+Phase 1 is the subset of the diagram above that is running code:
 
 ```mermaid
 flowchart LR
@@ -61,8 +171,39 @@ flowchart LR
     L --- D
 ```
 
-Applications depend on a model alias and one endpoint. The provider wire
-format, routing, retry policy, and trace callback stay behind LiteLLM.
+- LiteLLM provides one OpenAI-compatible gateway.
+- LibreChat provides the model picker and chat UI.
+- OpenAI and Anthropic provide model inference.
+- Langfuse records traces, tokens, latency, cost, and failures.
+- ClickHouse, Postgres, Redis, MinIO, and MongoDB support the application
+  services.
+
+!!! warning "Phase 1 is not an air-gapped deployment"
+    At least one external model-provider key is required, and every model
+    request leaves the local network. Sovereignty is the argument the
+    architecture makes; it becomes demonstrable in Phase 3, when there is a
+    self-hosted model for `--profile airgapped` to fall back to. See
+    [Background](background.md#the-cross-border-question) for why the transfer
+    question is the one that decides it.
+
+---
+
+## How the phases get there
+
+| Phase | Outcome | Status |
+|:--:|---|---|
+| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | In progress |
+| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
+| <span class="phase phase-3">3</span> | vLLM self-hosted serving alongside provider APIs | Not built yet |
+| <span class="phase phase-4">4</span> | Artifact storage and KV-cache reuse | Not built yet |
+| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and evaluation recipes | Not built yet |
+
+The Status column reports implementation state, not scope. AWS EC2 and
+Kubernetes targets are declared in `stack.yaml` but their deployment artifacts
+are not implemented either. See [Build-out phases](phases.md) for the end state
+and the acceptance criteria of each phase.
+
+---
 
 ## Why the gateway matters
 
@@ -91,6 +232,6 @@ Reference pages:
 | Topic | Page |
 |---|---|
 | Credential inventory and security | [Credentials](credentials.md) |
-| Current and planned scope | [Build-out phases](phases.md) |
+| The end state and the build order | [Build-out phases](phases.md) |
 | Lifecycle commands and targets | [Deployment](deployment.md) |
 | Presentation script | [Demo flow](demo-flow.md) |

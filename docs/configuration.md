@@ -43,7 +43,7 @@ It never contains a secret value, and it never names a specific host. That is de
 schema: 1
 
 project:
-  name: sovereign-ai-stack
+  name: llmops-in-a-box
   environment: demo
 
 defaults:
@@ -156,7 +156,7 @@ Resolves the config for a chosen `--target` and `--profile`, then renders the mo
 
 ```console
 $ ./scripts/stack.sh config
-project  sovereign-ai-stack (demo)
+project  llmops-in-a-box (demo)
 target   docker — Single-node Docker Compose on a laptop
 profile  phase-1 — Phase 1 — frontier models (OpenAI + Anthropic), no self-hosting
 

@@ -1,7 +1,8 @@
 site_name: LLMOps in a Box
 site_description: >-
-  Sovereign AI Stack — a composable, self-hosted enterprise AI stack: model
-  serving, unified gateway, chat UI, and full-stack observability.
+  A composable LLMOps reference stack: one gateway for commercial and
+  self-hosted models, full-stack tracing from the first request, and one
+  declarative stack definition.
 site_url: https://litkhai.github.io/llmops-in-a-box/
 site_author: Kee Hoon Lee
 

@@ -6,7 +6,12 @@ A composable LLMOps reference stack built around a single gateway:
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
 - **OpenAI and Anthropic** in the current Phase 1 stack
-- **MCP, vLLM, RunPod, and MinIO AIStor** in planned phases
+- **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
+
+The phases are a build order rather than a menu: the end state is a stack that
+serves models inside its own network boundary, reaches private data through
+scoped MCP servers, and owns its artifact store. Phase 1 builds the gateway and
+trace pipeline that everything after it plugs into.
 
 The current runnable target is a single-node Docker Compose deployment.
 `stack.yaml` is the source of truth for layers, models, profiles, credential
@@ -24,7 +29,7 @@ names, and deployment targets.
 | OpenAI / Anthropic requests through LiteLLM | Requires at least one provider key |
 | LiteLLM → Langfuse tracing | Runnable |
 | AWS EC2 target | Declared, Terraform not implemented |
-| Phases 2–5 | Planned |
+| Phases 2–5 | Not built yet |
 
 Phase 1 sends model requests to an external provider. It demonstrates the
 gateway and observability architecture; it is not an air-gapped deployment.
@@ -61,37 +66,45 @@ traced request.
 
 ## Architecture
 
+The shape the stack is built toward, with the phase that delivers each path:
+
 ```text
 LibreChat / applications
-          |
-          v
-  LiteLLM Gateway
-     |         |
-     v         v
-  OpenAI   Anthropic
-          |
-          v
-      Langfuse
-   ClickHouse · Postgres · Redis · MinIO
+        │
+        ▼
+LiteLLM Gateway ─────────── traces ──────────▶ Langfuse
+        │                                          │
+        ├─▶ OpenAI · Anthropic          phase 1     ClickHouse · Postgres
+        ├─▶ MCP tools                   phase 2        Redis · MinIO
+        └─▶ vLLM on RunPod              phase 3
+                 │
+                 └─▶ MinIO AIStor       phase 4
+                     datasets · artifacts · weights · KV cache
 ```
+
+Phase 1 — the OpenAI and Anthropic path plus the whole Langfuse column — is what
+runs today.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model
 alias and sends success and failure telemetry to Langfuse. The model catalog is
 rendered from `stack.yaml` into both LiteLLM and LibreChat configuration.
+Adding a later layer changes gateway configuration, not client code.
 
 ## Build-out
 
 | Phase | Outcome | Status |
 |:--:|---|---|
 | 1 | Gateway, UI, and tracing over frontier APIs | In progress |
-| 2 | MCP tool layer, starting with ClickHouse Cloud | Planned |
-| 3 | vLLM self-hosted serving alongside provider APIs | Planned |
-| 4 | Artifact storage and KV-cache reuse | Planned |
-| 5 | Routing, agents, guardrails, and evaluation recipes | Planned |
+| 2 | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
+| 3 | vLLM self-hosted serving alongside provider APIs | Not built yet |
+| 4 | Artifact storage and KV-cache reuse | Not built yet |
+| 5 | Routing, agents, guardrails, and evaluation recipes | Not built yet |
 
-See [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for
-scope and acceptance criteria. Planned components are documented as plans, not
-as runnable features.
+The Status column reports implementation state, not scope. See
+[Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for the
+end state, the acceptance criteria of each phase, and why the order is what it
+is. Nothing here is documented as runnable before its deployable artifact
+exists.
 
 ## Control plane
 
@@ -145,7 +158,7 @@ not be edited directly. Change `stack.yaml`, then run:
 | Prepare a machine and credentials | [Getting started](https://litkhai.github.io/llmops-in-a-box/getting-started/) |
 | Run the Phase 1 exercise | [Workshop](https://litkhai.github.io/llmops-in-a-box/workshop/) |
 | Understand the design choices | [Background](https://litkhai.github.io/llmops-in-a-box/background/) |
-| Inspect profiles and future scope | [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) |
+| See the end state and the build order | [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) |
 | Change layers or models | [Configuration](https://litkhai.github.io/llmops-in-a-box/configuration/) |
 | Operate a deployment target | [Deployment](https://litkhai.github.io/llmops-in-a-box/deployment/) |
 | Present the stack | [Demo flow](https://litkhai.github.io/llmops-in-a-box/demo-flow/) |

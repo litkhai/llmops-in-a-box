@@ -152,5 +152,5 @@ can make stored encrypted data unreadable.
     run `./scripts/stack.sh up` again so LiteLLM reloads them.
 
 Next: use the [Demo flow](demo-flow.md), change the model catalog in
-[Configuration](configuration.md), or review the planned
-[build-out phases](phases.md).
+[Configuration](configuration.md), or read the
+[build-out phases](phases.md) for what comes after Phase 1.
