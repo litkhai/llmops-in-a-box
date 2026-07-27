@@ -8,10 +8,15 @@ A composable LLMOps reference stack built around a single gateway:
 - **OpenAI and Anthropic** in the current Phase 1 stack
 - **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
 
-The phases are a build order rather than a menu: the end state is a stack that
-serves models inside its own network boundary, reaches private data through
-scoped MCP servers, and owns its artifact store. Phase 1 builds the gateway and
-trace pipeline that everything after it plugs into.
+The phases are a build order rather than a menu. The destination is an agent
+platform: models served inside the network boundary, private data reached
+through scoped MCP servers, an artifact store the operator owns, and — the part
+the rest exists for — outputs scored automatically by a judge model, with those
+scores feeding back into routing. Automated evaluation is what makes an agent
+operable rather than demoable; it takes too many steps to check by hand, and
+routing has nothing to act on until something scores it. Phase 1 builds the
+gateway and trace pipeline everything after it plugs into, because closing that
+loop needs one point that both measures a request and decides where it goes.
 
 The current runnable target is a single-node Docker Compose deployment.
 `stack.yaml` is the source of truth for layers, models, profiles, credential
@@ -98,7 +103,7 @@ Adding a later layer changes gateway configuration, not client code.
 | 2 | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
 | 3 | vLLM self-hosted serving alongside provider APIs | Not built yet |
 | 4 | Artifact storage and KV-cache reuse | Not built yet |
-| 5 | Routing, agents, guardrails, and evaluation recipes | Not built yet |
+| 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The Status column reports implementation state, not scope. See
 [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for the

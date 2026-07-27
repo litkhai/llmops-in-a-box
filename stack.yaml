@@ -83,8 +83,11 @@ phases:
     status: not_built
     scope: >-
       No new layers. Context-based routing in LiteLLM, LibreChat Agents over
-      the Phase 2 MCP tools, and Langfuse evaluations — the things worth
-      doing once Phases 1-4 are up, each producing evidence in Langfuse.
+      the Phase 2 MCP tools, Langfuse evaluations, gateway guardrails, and
+      finally judge-scored routing — aggregate judge scores feeding back into
+      where requests go. That loop is the destination Phases 1-4 exist to make
+      possible: it needs one point that both measures a request and decides
+      its route.
     adds_layers: []
     adds_models: []
 

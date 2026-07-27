@@ -19,7 +19,11 @@ The usual path into GenAI is not a decision, it is an accumulation. One team shi
 
 **There is no place to put a policy.** PII redaction, rate limits, budget caps, an audit log, a model allow-list — each has to be implemented in every application, by every team, correctly. The next notebook walks past all of it.
 
+**Nobody can tell whether it is getting better.** Quality is discussed anecdotally — someone saw a bad answer, someone else believes the new prompt helped. With no scores attached to real traffic there is no baseline to regress against, so prompt and model changes ship on conviction. And because nothing measures quality, nothing can act on it: routing stays a static config that cannot respond to a route getting worse.
+
 Each of these is the same problem: **there is no single point every request passes through.** The stack in this repo is the argument that creating one is the highest-leverage thing an enterprise can do early, because every other capability becomes available once it exists.
+
+The last one is also the reason the *same* point has to do both jobs. Measuring quality and deciding where a request goes are separate concerns right up until you want the first to change the second — and then they have to live together, or the loop cannot close. That is what [Phase 5.5](phases.md#55-closing-the-loop-judge-scored-routing) builds, and why it is the destination rather than a late addition.
 
 ---
 

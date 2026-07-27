@@ -44,11 +44,49 @@ Enterprises adopting GenAI face the same three questions:
 
     Every prompt, latency, token, cost, and failure.
 
+-   :material-gavel: **Can the system act on its own quality data?**
+
+    Outputs scored by an LLM judge, and those scores changing how requests are
+    routed.
+
 </div>
 
 This is a **reference architecture plus deployment scripts** that answers all
-three with open-source building blocks. Layers are fixed; implementations are
+four with open-source building blocks. Layers are fixed; implementations are
 swappable.
+
+### The destination: an agent platform
+
+The fourth question is the one that decides whether such a thing can be operated
+at all, which is why it is the purpose the other three serve.
+
+A single completion can be judged by reading it. An agent cannot. It plans,
+calls tools, and takes several steps, so its output space is too large to
+inspect by hand and its failures are compositional — a correct answer reached
+through the wrong tool call is still a defect, and nobody notices by eye.
+Automated scoring is therefore not a reporting feature added at the end. It is
+the only mechanism by which an agent's behaviour becomes known, and the only
+signal a routing decision can act on.
+
+That is what the layers add up to:
+
+| Layer | What it contributes to the platform |
+|---|---|
+| Gateway | where models are reached and policy is enforced |
+| Tools | what an agent is permitted to do |
+| Observability | what it actually did |
+| Evaluation | whether that was any good |
+| Routing | what changes as a result |
+
+Each one is the input to the next, which is why they are built in that order.
+Closing the loop also needs one point that both **measures** every request and
+**enforces** where it goes — the same point, or there is no loop. That is the
+gateway, and it is why the gateway is the first thing built rather than the last.
+
+Agents arrive in <span class="phase phase-2">Phase 2</span> and
+<span class="phase phase-5">Phase 5</span>; the loop that makes them measurable
+is [Phase 5.5](phases.md#55-closing-the-loop-judge-scored-routing). What runs
+today is the gateway and the trace pipeline underneath all of it.
 
 ---
 
@@ -196,7 +234,7 @@ flowchart LR
 | <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
 | <span class="phase phase-3">3</span> | vLLM self-hosted serving alongside provider APIs | Not built yet |
 | <span class="phase phase-4">4</span> | Artifact storage and KV-cache reuse | Not built yet |
-| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and evaluation recipes | Not built yet |
+| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The Status column reports implementation state, not scope. AWS EC2 and
 Kubernetes targets are declared in `stack.yaml` but their deployment artifacts

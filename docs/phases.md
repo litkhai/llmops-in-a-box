@@ -7,6 +7,12 @@ state, not scope.
 
 ## The end state
 
+The destination is an agent platform: agents that reach private data through
+declared tools, are scored automatically instead of reviewed by hand, and are
+routed on those scores. Automated evaluation is the load-bearing part — an agent
+takes several steps over a large output space, so it cannot be checked by eye,
+and a routing decision has nothing to act on until something scores it.
+
 When the build-out is complete, one `stack.yaml` describes a stack in which:
 
 - every request enters through one OpenAI-compatible gateway, whichever model
@@ -21,11 +27,25 @@ When the build-out is complete, one `stack.yaml` describes a stack in which:
   recomputed on every request
 - routing, guardrails, and evaluation are configured at the gateway, so they
   apply to every client at once
+- output quality is scored automatically by a judge model, and those scores
+  feed back into routing
 
-`--profile airgapped` is the acceptance test for the whole arc: it must resolve
-to a working stack with no commercial model and no commercial fallback anywhere
-in the generated config. It cannot pass today, because there is no self-hosted
-model for it to fall back to. Phase 3 is what makes it pass.
+The last bullet is the destination, not an extra feature. Every layer before it
+exists to make it possible: the gateway is the one place that both measures a
+request and decides where it goes, tracing turns quality into data instead of
+anecdote, self-hosted serving makes a judge affordable to run on every sampled
+request and keeps prompts inside the boundary, and the artifact store holds the
+datasets the judge is calibrated against.
+
+Two acceptance tests bound the arc:
+
+| Test | What it proves | Made possible by |
+|---|---|---|
+| `--profile airgapped` resolves to a working stack with no commercial model and no commercial fallback anywhere in the generated config | the boundary is real, not configured | Phase 3 |
+| An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 5 |
+
+Neither passes today. The first cannot, because there is no self-hosted model to
+fall back to; the second cannot, because nothing scores anything yet.
 
 ## Order and current state
 
@@ -46,7 +66,7 @@ are cumulative.
 | 2 | MCP tool layer | Not built yet |
 | 3 | Self-hosted vLLM serving | Not built yet |
 | 4 | Artifact storage and KV-cache reuse | Not built yet |
-| 5 | Routing, agents, evaluations, and guardrails | Not built yet |
+| 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The AWS and Kubernetes deployment artifacts are not implemented either. A
 profile can describe a layer before that layer is runnable; `stack.sh` warns and
@@ -144,7 +164,9 @@ can become a build target.
 ## Phase 5 — Operating recipes
 
 Phase 5 adds no infrastructure layer. It demonstrates how to operate the
-gateway, tools, serving, and trace data built earlier.
+gateway, tools, serving, and trace data built earlier — and in 5.5 it joins
+routing to scoring, which is the capability the earlier phases were building
+toward.
 
 ### 5.1 Context-based routing in LiteLLM
 
@@ -206,6 +228,56 @@ Acceptance criteria:
 - synthetic sensitive data is redacted or blocked before provider egress
 - the trace shows which guardrail ran and its outcome
 - false positives, false negatives, and latency are measured
+
+### 5.5 Closing the loop — judge-scored routing
+
+5.1 decides where a request goes. 5.3 decides how good the answer was. Joining
+them is the point of the build-out: scores stop being a dashboard and become an
+input to routing.
+
+There are two loops here, and conflating them is the mistake to avoid — they
+have different costs and different failure modes.
+
+| | Offline — policy adaptation | Online — response-time re-route |
+|---|---|---|
+| Trigger | aggregate scores over a window | a low score on this request |
+| Effect | the routing table changes | retry on a stronger model before answering |
+| Added latency | none | judge call plus a second inference |
+| Judge spend | on a sample | on every scored request |
+| Failure mode | drift on noisy scores | user-visible latency; oscillation between routes |
+
+Start with the offline loop. It is the one that pays for itself: a cheap model
+carries the traffic, aggregate judge scores per route show where it is not good
+enough, and the routing table changes deliberately. The online loop is worth its
+latency only where a wrong answer costs more than a slow one.
+
+Constraints that do not relax:
+
+- **A judge score must not control residency, security, or hard budget
+  boundaries.** This is the same rule 5.1 applies to the intent classifier.
+  Quality may choose among already-permitted routes; it may not widen the
+  permitted set.
+- **The judge is a model, so it is traced and costed like any other call.** Its
+  spend belongs in the same Langfuse view as the traffic it judges, or the
+  loop's own cost stays invisible while it changes routing.
+- **A model judging its own output biases the result** (5.3). If the judge and a
+  candidate route are the same model, that comparison is not neutral.
+- **Sample until judge/human agreement is measured.** An unvalidated judge
+  driving automated routing is an unmeasured system changing its own behaviour.
+- **`airgapped` requires a self-hosted judge.** A hosted judge API receives the
+  prompt and the completion, so it defeats the boundary for exactly the reason
+  a hosted guardrail does in 5.4.
+
+Acceptance criteria:
+
+- judge scores are attached to traces and queryable per model and per route
+- a documented rule maps aggregate scores to a routing change, and applying that
+  rule is observable in the trace data
+- judge spend appears as its own line beside serving cost
+- judge/human agreement is measured on a sample before any automated routing
+  change is enabled
+- `airgapped` resolves a self-hosted judge, or scoring is disabled in that
+  profile rather than silently egressing
 
 ## Profiles
 
