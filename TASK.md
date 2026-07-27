@@ -1,338 +1,123 @@
-# Task: PR 2 — Terraform base for single-node EC2 deployment
+# Task: PR 1 — Docker validation smoke-test and EE license check
 
 ## Branch
-`pr/2-terraform-base` — base: `main`
+`pr/1-docker-validation` — base: `main`
 
 ## Goal
-Create the `terraform/` directory with all HCL files needed to provision a
-single EC2 instance (t3.xlarge, ap-northeast-2) running the Phase 1 compose
-stack. This PR contains only infrastructure declarations — no scripts, no
-stack.sh changes, no docs changes.
+Add `./scripts/stack.sh smoke-test` and improve `doctor` to surface the
+Langfuse Enterprise Edition license status. No new infrastructure. No new
+files outside `scripts/stack.sh` and `docs/getting-started.md`.
 
-## Context from stack.yaml
+## Changes required
 
-```yaml
-targets:
-  aws-ec2:
-    kind: terraform
-    dir: terraform          # <-- this directory does not exist yet
-    host: null              # resolved from terraform output public_ip
-    vars:
-      instance_type: t3.xlarge
-      volume_size_gb: 100
-      volume_type: gp3
-      region: ap-northeast-2
-      # key_name and allowed_cidr have no safe default — must be passed explicitly
-```
+### 1. `scripts/stack.sh` — new function `cmd_smoke_test()`
 
-`stack.sh up --target aws-ec2` already calls `terraform init` + `terraform apply`
-and reads `public_ip` from terraform output. It fails today only because
-`terraform/` does not exist. Creating this directory is the entire unlock.
+Insert after `cmd_status()` (around line 1839), before `cmd_logs()`:
 
-## Files to create
+```bash
+cmd_smoke_test() {
+  resolve_defaults; load_env
+  local host fail=0 code body model
+  host="$(target_host)"
+  model="$(resolved_models | head -1)"
+  [ -n "$model" ] || die "no models resolved for profile=$PROFILE"
 
-### `terraform/variables.tf`
+  info "Smoke test  ${C_DIM}host=$host  model=$model${C_RST}"
 
-```hcl
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "ap-northeast-2"
-}
+  # 1. LiteLLM liveness
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://$host:4000/health/liveliness" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*) ok "$(printf '%-16s' litellm) $code" ;;
+    *)     bad "$(printf '%-16s' litellm) ${code:-no-response}"; fail=1 ;;
+  esac
 
-variable "instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t3.xlarge"
-}
+  # 2. Langfuse liveness
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://$host:3000/api/public/health" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*) ok "$(printf '%-16s' langfuse) $code" ;;
+    *)     bad "$(printf '%-16s' langfuse) ${code:-no-response}"; fail=1 ;;
+  esac
 
-variable "volume_size_gb" {
-  description = "Root EBS volume size in GiB"
-  type        = number
-  default     = 100
-}
+  # 3. Chat completion round-trip through LiteLLM
+  if [ "$fail" -eq 0 ]; then
+    local tmp; tmp="$(mktemp)"
+    code="$(curl -s -o "$tmp" -w '%{http_code}' --max-time 30 \
+      -X POST "http://$host:4000/chat/completions" \
+      -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+      -H "Content-Type: application/json" \
+      -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+      2>/dev/null || true)"
+    case "$code" in
+      2*) ok "$(printf '%-16s' chat_completion) $code  model=$model" ;;
+      *)  bad "$(printf '%-16s' chat_completion) ${code:-no-response}"; cat "$tmp" >&2; fail=1 ;;
+    esac
+    rm -f "$tmp"
+  fi
 
-variable "volume_type" {
-  description = "EBS volume type"
-  type        = string
-  default     = "gp3"
-}
-
-variable "key_name" {
-  description = "EC2 key pair name for SSH access. No default — pass with --tf-var key_name=<name>."
-  type        = string
-}
-
-variable "allowed_cidr" {
-  description = "CIDR block allowed inbound. Never 0.0.0.0/0. Pass with --tf-var allowed_cidr=<your-ip>/32."
-  type        = string
-
-  validation {
-    condition     = var.allowed_cidr != "0.0.0.0/0"
-    error_message = "allowed_cidr must not be 0.0.0.0/0 — this stack holds live provider API keys."
-  }
-}
-
-variable "project_slug" {
-  description = "Resource name prefix — matches stack.yaml project.slug"
-  type        = string
-  default     = "sais"
-}
-
-variable "ssm_path_prefix" {
-  description = "SSM Parameter Store path prefix for stack secrets"
-  type        = string
-  default     = "/sais/phase-1"
+  say ""
+  if [ "$fail" -eq 0 ]; then say "${C_GRN}${C_B}smoke test passed${C_RST}"
+  else die "smoke test failed — fix the ✗ items above"; fi
 }
 ```
 
-### `terraform/main.tf`
+Constraints:
+- bash 3.2 compatible: no `[[`, no `${var^^}`, no associative arrays
+- Use `printf` not `echo`
+- `mktemp` without `-p` for macOS compatibility
+- Follow the style of `cmd_status()` exactly
 
-```hcl
-terraform {
-  required_version = ">= 1.5"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
+### 2. `scripts/stack.sh` — update `cmd_doctor()`
 
-provider "aws" {
-  region = var.region
-}
+After the existing "Secrets" info block (around line 408), add an
+"Observability" check that runs when the `observability` layer is active:
 
-# Use the default VPC. A dedicated VPC would add ~30 resources and obscure
-# the stack being demonstrated; the demo does not need the isolation.
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
-
-# Latest Amazon Linux 2023 x86_64 (t3 is x86 — not arm64)
-data "aws_ami" "al2023" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-2023.*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
+```bash
+  if resolved_layers | grep -qx observability; then
+    info "Observability"
+    if [ -n "${LANGFUSE_EE_LICENSE_KEY:-}" ]; then
+      ok "Langfuse EE license set"
+    else
+      warn "LANGFUSE_EE_LICENSE_KEY unset — running Langfuse OSS (no SSO, no data-retention policy, no audit log)"
+    fi
+  fi
 ```
 
-### `terraform/sg.tf`
+### 3. `scripts/stack.sh` — update `usage()`
 
-```hcl
-resource "aws_security_group" "stack" {
-  name        = "${var.project_slug}-stack"
-  description = "LLMOps in a Box — inbound from operator CIDR only"
-  vpc_id      = data.aws_vpc.default.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_cidr]
-    description = "SSH"
-  }
-
-  ingress {
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_cidr]
-    description = "Langfuse"
-  }
-
-  ingress {
-    from_port   = 3080
-    to_port     = 3080
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_cidr]
-    description = "LibreChat"
-  }
-
-  ingress {
-    from_port   = 4000
-    to_port     = 4000
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_cidr]
-    description = "LiteLLM"
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Outbound — provider API calls and package downloads"
-  }
-
-  tags = {
-    Name    = "${var.project_slug}-stack"
-    Project = var.project_slug
-  }
-}
+Add to the COMMANDS section (after `status`):
+```
+  smoke-test  Send a test request end-to-end and verify the trace pipeline
 ```
 
-### `terraform/iam.tf`
+### 4. `scripts/stack.sh` — update `main()` dispatch
 
-```hcl
-# IAM role assumed by the EC2 instance — grants read access to SSM parameters
-# that hold the stack secrets. Bootstrap script (PR 3) uses this to pull .env.
-resource "aws_iam_role" "ec2" {
-  name = "${var.project_slug}-ec2"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = {
-    Project = var.project_slug
-  }
-}
-
-resource "aws_iam_role_policy" "ssm_read" {
-  name = "${var.project_slug}-ssm-read"
-  role = aws_iam_role.ec2.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ssm:GetParameter",
-        "ssm:GetParametersByPath"
-      ]
-      Resource = "arn:aws:ssm:${var.region}:*:parameter${var.ssm_path_prefix}/*"
-    }]
-  })
-}
-
-resource "aws_iam_instance_profile" "ec2" {
-  name = "${var.project_slug}-ec2"
-  role = aws_iam_role.ec2.name
-}
+Add before the `*) die ...` catch-all:
+```bash
+    smoke-test) require_yq; cmd_smoke_test ;;
 ```
 
-### `terraform/ec2.tf`
+### 5. `docs/getting-started.md`
 
-```hcl
-resource "aws_instance" "stack" {
-  ami                    = data.aws_ami.al2023.id
-  instance_type          = var.instance_type
-  key_name               = var.key_name
-  subnet_id              = tolist(data.aws_subnets.default.ids)[0]
-  vpc_security_group_ids = [aws_security_group.stack.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2.name
-
-  root_block_device {
-    volume_size = var.volume_size_gb
-    volume_type = var.volume_type
-    encrypted   = true
-  }
-
-  # bootstrap-ec2.sh (PR 3) installs Docker, pulls secrets from SSM,
-  # and starts the Phase 1 compose stack on first boot.
-  user_data = fileexists("${path.module}/../scripts/bootstrap-ec2.sh") ? file("${path.module}/../scripts/bootstrap-ec2.sh") : "#!/bin/bash\necho 'bootstrap-ec2.sh not yet present — see PR 3'"
-
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"   # IMDSv2 only
-    http_put_response_hop_limit = 1
-  }
-
-  tags = {
-    Name    = "${var.project_slug}-stack"
-    Project = var.project_slug
-  }
-}
-```
-
-### `terraform/outputs.tf`
-
-```hcl
-output "public_ip" {
-  description = "Public IP — read by stack.sh target_host() for remote health checks"
-  value       = aws_instance.stack.public_ip
-}
-
-output "instance_id" {
-  description = "EC2 instance ID"
-  value       = aws_instance.stack.id
-}
-
-output "ssh_command" {
-  description = "SSH connection string"
-  value       = "ssh -i <key>.pem ec2-user@${aws_instance.stack.public_ip}"
-}
-
-output "stack_urls" {
-  description = "Service endpoints (accessible once bootstrap completes)"
-  value = {
-    langfuse  = "http://${aws_instance.stack.public_ip}:3000"
-    librechat = "http://${aws_instance.stack.public_ip}:3080"
-    litellm   = "http://${aws_instance.stack.public_ip}:4000"
-  }
-}
-```
-
-### `terraform/.gitignore`
-
-```
-.terraform/
-.terraform.lock.hcl
-terraform.tfstate
-terraform.tfstate.backup
-*.tfplan
-crash.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-```
+Read the file first. Add a short "Verify the stack" section (3–5 lines)
+after the section that describes starting the stack, pointing to
+`./scripts/stack.sh smoke-test` as the end-to-end check.
 
 ## Validation (run before committing)
 
 ```bash
-# Syntax check all HCL files
-terraform -chdir=terraform validate 2>/dev/null || \
-  terraform -chdir=terraform init -backend=false && terraform -chdir=terraform validate
-
-# Confirm stack.sh resolves the terraform dir correctly
 bash -n scripts/stack.sh
-./scripts/stack.sh doctor --target aws-ec2 2>&1 | grep -i terraform
-```
-
-If terraform is not installed locally, at minimum confirm:
-```bash
-# All .tf files parse as valid HCL (no syntax errors visible on inspection)
-# .gitignore exists and covers .terraform/ and *.tfstate
+./scripts/stack.sh help | grep smoke-test
+yq -e '.' stack.yaml >/dev/null
+mkdocs build --strict
 ```
 
 ## Commit
 
 ```
-git add terraform/
-git commit -m "Add Terraform base for single-node EC2 deployment"
+git add scripts/stack.sh docs/getting-started.md
+git commit -m "Add smoke-test command and Langfuse EE license check in doctor"
 ```
 
 ## PR
@@ -340,23 +125,19 @@ git commit -m "Add Terraform base for single-node EC2 deployment"
 ```bash
 gh pr create \
   --base main \
-  --head pr/2-terraform-base \
-  --title "Add Terraform base for single-node EC2 deployment" \
+  --head pr/1-docker-validation \
+  --title "Add smoke-test command and Langfuse EE license check" \
   --body "$(cat <<'EOF'
 ## Summary
-- Adds \`terraform/\` with provider config, VPC data sources, security group, IAM role/profile, EC2 instance, and outputs
-- Security group restricts all inbound (22, 3000, 3080, 4000) to \`allowed_cidr\` — 0.0.0.0/0 rejected by variable validation
-- EC2 uses IMDSv2, encrypted root volume, and IAM instance profile scoped to SSM read on \`/sais/phase-1/*\`
-- \`output.public_ip\` is what \`stack.sh target_host()\` reads to resolve the remote host for health checks and URLs
-
-## Unlocks
-\`./scripts/stack.sh up --target aws-ec2\` currently exits with "terraform dir not found". This PR removes that blocker.
+- Adds \`./scripts/stack.sh smoke-test\`: hits LiteLLM and Langfuse health endpoints, then sends a real chat completion to verify the full request path
+- Updates \`doctor\` to flag Langfuse EE license status separately under an Observability section
+- Documents the smoke-test step in getting-started
 
 ## Test plan
-- [ ] \`terraform -chdir=terraform init\` succeeds
-- [ ] \`terraform -chdir=terraform plan -var key_name=test -var allowed_cidr=1.2.3.4/32\` produces a clean plan
-- [ ] \`terraform -chdir=terraform plan -var key_name=test -var allowed_cidr=0.0.0.0/0\` fails validation
-- [ ] \`./scripts/stack.sh doctor --target aws-ec2\` confirms terraform binary found
+- [ ] \`./scripts/stack.sh smoke-test\` exits 0 with the Phase 1 stack running and real keys set
+- [ ] \`./scripts/stack.sh smoke-test\` exits non-zero when LiteLLM is not running
+- [ ] \`./scripts/stack.sh doctor\` shows EE license status under Observability
+- [ ] \`./scripts/stack.sh help\` lists smoke-test
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -364,7 +145,7 @@ EOF
 ```
 
 ## Working agreements (from AGENTS.md)
-- Keep changes aligned with the current phase declared in `stack.yaml`
-- Do not claim the target is implemented until the bootstrap script (PR 3) and
-  stack.sh wiring (PR 4) also land — this PR is infrastructure-only
+- Keep `scripts/stack.sh` compatible with macOS Bash 3.2
 - Never inspect, print, or commit values from `.env` or `secrets/credentials.yaml`
+- Update `docs/` when behavior or commands change
+- Do not claim a feature is implemented until a meaningful validation path exists
