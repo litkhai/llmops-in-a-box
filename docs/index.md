@@ -28,7 +28,7 @@ LiteLLM · LibreChat · Langfuse · ClickHouse · OpenAI · Anthropic
 
 ## Why this exists
 
-Enterprises adopting GenAI face the same three questions:
+Enterprises adopting GenAI keep arriving at the same questions:
 
 <div class="grid cards" markdown>
 
@@ -49,16 +49,33 @@ Enterprises adopting GenAI face the same three questions:
     Outputs scored by an LLM judge, and those scores changing how requests are
     routed.
 
+-   :material-layers-triple: **Can we replace a layer without rewriting the stack?**
+
+    vLLM → SGLang, RunPod → on-prem GPU, LibreChat → your own app. No layer
+    should be a bet on a single vendor.
+
+-   :material-radar: **Which parts of the sovereign-AI landscape are real?**
+
+    The space turns over every few months and much of it is still claims.
+    Standing a layer up is how you find out which ones hold.
+
 </div>
 
 This is a **reference architecture plus deployment scripts** that answers all
-four with open-source building blocks. Layers are fixed; implementations are
+six with open-source building blocks. Layers are fixed; implementations are
 swappable.
+
+The last two are why the layer boundaries are worth the effort. A fixed layer
+with a swappable implementation is both an escape route and an instrument: when
+a new serving engine, GPU host, or cache appears, it can be tried in place of
+the current one and measured against the same traces, instead of evaluated from
+a vendor's benchmark. Keeping current with sovereign AI infrastructure is a
+side effect of the architecture rather than a separate research project.
 
 ### The destination: an agent platform
 
-The fourth question is the one that decides whether such a thing can be operated
-at all, which is why it is the purpose the other three serve.
+Acting on quality data is the question that decides whether an agent platform can
+be operated at all, which is why the others serve it.
 
 A single completion can be judged by reading it. An agent cannot. It plans,
 calls tools, and takes several steps, so its output space is too large to
@@ -73,15 +90,18 @@ That is what the layers add up to:
 | Layer | What it contributes to the platform |
 |---|---|
 | Gateway | where models are reached and policy is enforced |
+| Serving | models running inside the boundary, so the loop can run on private data |
 | Tools | what an agent is permitted to do |
 | Observability | what it actually did |
 | Evaluation | whether that was any good |
 | Routing | what changes as a result |
 
-Each one is the input to the next, which is why they are built in that order.
-Closing the loop also needs one point that both **measures** every request and
-**enforces** where it goes — the same point, or there is no loop. That is the
-gateway, and it is why the gateway is the first thing built rather than the last.
+They are built in that order because each one is what the next has to operate
+on: nothing can score what was never traced, and nothing can route on a score
+that does not exist. Closing the loop also needs one point that both
+**measures** every request and **enforces** where it goes — the same point, or
+there is no loop. That is the gateway, which is why it is the first thing built
+rather than the last.
 
 Agents arrive in <span class="phase phase-2">Phase 2</span> and
 <span class="phase phase-5">Phase 5</span>; the loop that makes them measurable
