@@ -1,4 +1,4 @@
-# LLMOPS In a Box
+# LLMOps in a Box
 
 A composable LLMOps reference stack built around a single gateway:
 

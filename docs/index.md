@@ -7,7 +7,7 @@ hide:
 
 <span class="hero-eyebrow">Composable LLMOps reference stack</span>
 
-# LLMOPS In a Box
+# LLMOps in a Box
 
 <p class="hero-sub">
 One gateway for commercial and self-hosted models, one trace pipeline, and one
