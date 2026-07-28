@@ -337,6 +337,11 @@ layers:
       title_model: gpt-4o       # cheap model used to auto-title conversations
       # Reached over the compose network, not via localhost.
       gateway_internal_url: http://litellm:4000/v1
+      # Models exposed in the LibreChat picker. When language_routing is enabled
+      # the gateway handles model selection transparently, so only "auto" is
+      # needed here. Override to expose individual aliases if required.
+      exposed_models:
+        - auto
 
   serving:
     phase: 3

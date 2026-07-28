@@ -11,8 +11,7 @@ endpoints:
       baseURL: "http://litellm:4000/v1"
       models:
         default:
-          - "gpt-4o"
-          - "claude-sonnet"
+          - "auto"
         fetch: false
       titleConvo: true
       titleModel: "gpt-4o"

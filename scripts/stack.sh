@@ -256,6 +256,20 @@ render_litellm() {
       printf '      output_cost_per_token: %s\n' "$out_tok"
     done < <(resolved_models)
 
+    # ── auto alias — emitted when language_routing is enabled ──
+    # The callback rewrites the model before routing; "auto" is just an
+    # entry point alias. It points at the english_model as the default.
+    local lr_enabled lr_english
+    lr_enabled="$(qs '.layers.gateway.options.language_routing.enabled')"
+    lr_english="$(qs '.layers.gateway.options.language_routing.english_model')"
+    if [ "$lr_enabled" = "true" ] && [ -n "$lr_english" ]; then
+      printf '  - model_name: auto\n'
+      printf '    litellm_params:\n'
+      printf '      model: %s\n' "$lr_english"
+      printf '    model_info:\n'
+      printf '      mode: chat\n'
+    fi
+
     # ── litellm_settings ──
     printf '\nlitellm_settings:\n'
     printf '  success_callback: [%s]\n' "$(q '.layers.gateway.options.callbacks.success | join(", ")')"
@@ -330,10 +344,19 @@ render_librechat() {
     printf '      baseURL: "%s"\n' "$(qs '.layers.ui.options.gateway_internal_url')"
     printf '      models:\n'
     printf '        default:\n'
-    while IFS= read -r a; do
-      [ -n "$a" ] || continue
-      printf '          - "%s"\n' "$a"
-    done < <(resolved_models)
+    # Use exposed_models if declared; fall back to the full resolved model list.
+    local exposed_count; exposed_count="$(q '.layers.ui.options.exposed_models | length')"
+    if [ "${exposed_count:-0}" -gt 0 ]; then
+      while IFS= read -r a; do
+        [ -n "$a" ] || continue
+        printf '          - "%s"\n' "$a"
+      done < <(q '.layers.ui.options.exposed_models[]')
+    else
+      while IFS= read -r a; do
+        [ -n "$a" ] || continue
+        printf '          - "%s"\n' "$a"
+      done < <(resolved_models)
+    fi
     printf '        fetch: false\n'
     printf '      titleConvo: true\n'
     # Only auto-title with a model this profile actually exposes.

@@ -24,6 +24,11 @@ model_list:
       max_input_tokens: 200000
       input_cost_per_token: 3e-06
       output_cost_per_token: 1.5e-05
+  - model_name: auto
+    litellm_params:
+      model: gpt-4o
+    model_info:
+      mode: chat
 
 litellm_settings:
   success_callback: [langfuse]
