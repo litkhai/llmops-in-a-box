@@ -8,9 +8,14 @@ eventually runs.
 
 | Target | Use it for | Status |
 |---|---|---|
-| `docker` | Local development and the current demo | **Runnable** |
-| `aws-ec2` | A single EC2 host running the same Compose stack | **Runnable** |
+| `docker` | Local development | **Runnable** |
+| `aws-ec2` | Shared deployment with HTTPS on a custom domain | **Runnable** |
 | `k8s` | A future production deployment | Planned |
+
+**`aws-ec2`** is recommended when you want to share the stack with others. It
+runs the same Compose stack on a single EC2 instance with automatic HTTPS via
+Caddy (Let's Encrypt). See [Deployment — AWS EC2](deployment.md#aws-ec2) for
+the full guide.
 
 ## 2. Prepare Docker
 
@@ -86,3 +91,5 @@ its trace, compare providers, and tear the stack down.
 To deploy to AWS EC2 instead of running locally, follow the
 [AWS EC2 deployment guide](deployment.md#aws-ec2). You will need Terraform ≥ 1.5,
 an AWS account with EC2 and SSM access, and an EC2 key pair in `ap-northeast-2`.
+If you want HTTPS on a custom domain, also run `./scripts/stack.sh secrets domain`
+before pushing credentials.

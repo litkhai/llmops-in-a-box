@@ -212,31 +212,28 @@ credential:
 If the instance is already running and you want to add HTTPS:
 
 ```bash
-# 1. Set domain config in .env
+# 1. Set domain config locally and push to SSM
 ./scripts/stack.sh secrets domain
-
-# 2. Push to SSM
 ./scripts/stack.sh secrets push --target aws-ec2
 
-# 3. SSH into the instance
+# 2. SSH into the instance and apply
 ./scripts/stack.sh ssh --target aws-ec2
-
-# On the instance:
-cd /opt/llmops-in-a-box
-
-# Pull updated SSM parameters into .env
-./scripts/stack.sh secrets pull  # or re-run the SSM fetch manually
-
-# Render Caddyfile
-./scripts/stack.sh render --target aws-ec2 --profile phase-1
-
-# Start the proxy
-docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d
 ```
 
-Or, with `DOMAIN_BASE` already in `/opt/llmops-in-a-box/.env` on the instance:
+On the instance:
 
 ```bash
+cd /opt/llmops-in-a-box
+
+# Pull latest code
+git pull origin main
+
+# Write DOMAIN_BASE and DOMAIN_SSL_EMAIL into .env
+# (re-fetch from SSM, or set directly)
+echo "DOMAIN_BASE=example.com" >> .env
+echo "DOMAIN_SSL_EMAIL=you@example.com" >> .env
+
+# Render Caddyfile and start proxy
 ./scripts/stack.sh render --target aws-ec2 --profile phase-1
 docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d
 ```

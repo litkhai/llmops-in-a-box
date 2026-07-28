@@ -109,6 +109,24 @@ Langfuse project keys are chosen before first boot and passed through
 `LANGFUSE_INIT_*`. This lets Langfuse create the organization, project, user,
 and key pair while LiteLLM starts with tracing already configured.
 
+## Domain configuration (aws-ec2)
+
+The domain and SSL email for the Caddy HTTPS proxy are not secrets but are
+pushed to SSM alongside credentials so the EC2 bootstrap can read them from
+one place:
+
+```bash
+./scripts/stack.sh secrets domain
+# prompts for DOMAIN_BASE (e.g. example.com) and DOMAIN_SSL_EMAIL
+# writes both to .env
+
+./scripts/stack.sh secrets push --target aws-ec2
+# pushes DOMAIN_BASE and DOMAIN_SSL_EMAIL to SSM along with all other credentials
+```
+
+These values are listed under `secrets.optional."1"` in `stack.yaml` so
+`secrets push` picks them up automatically.
+
 ## Focused and automated use
 
 ```bash
