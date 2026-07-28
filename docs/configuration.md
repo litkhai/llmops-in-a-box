@@ -203,6 +203,44 @@ Add one entry to `models:` in `stack.yaml`, then re-render. The gateway and the 
 
 ---
 
+## Language routing
+
+LiteLLM routes requests automatically by the dominant script of the last user message — no client changes required.
+
+| Detected script | Target model |
+|---|---|
+| Latin (English, etc.) | `gpt-4o` |
+| Non-Latin (Korean, Chinese, Japanese, …) | `claude-sonnet` |
+
+Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
+
+The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched.
+
+**Fallback:** `claude-sonnet → gpt-4o`. If the Anthropic endpoint is unavailable, LiteLLM retries the request on GPT-4o.
+
+The routing logic lives in `docker/litellm_callbacks.py` as a `CustomLogger` pre-call hook and is controlled by `stack.yaml`:
+
+```yaml
+layers:
+  gateway:
+    options:
+      language_routing:
+        enabled: true
+        english_model: gpt-4o
+        multilingual_model: claude-sonnet
+        threshold: 0.15
+      routing:
+        fallbacks:
+          - from: claude-sonnet
+            to: [gpt-4o]
+```
+
+When `language_routing.enabled` is `true`, `render` adds `custom_callbacks: [/app/callbacks.py]` to `litellm_settings` in the generated config, and the callback file is mounted read-only into the `litellm` container.
+
+To disable routing and send all requests to a single model, set `language_routing.enabled: false` and re-render.
+
+---
+
 ## Generated files
 
 `docker/litellm_config.yaml` and `docker/librechat.yaml` carry a generation banner and **must not be hand-edited** — `render` overwrites them, and `up` renders by default.
