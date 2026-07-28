@@ -70,32 +70,67 @@ def _dominant_script(text: str) -> str:
 
 # ── image generation ──────────────────────────────────────────────────────────
 
+async def _call_cloudflare(prompt: str, client: httpx.AsyncClient) -> str:
+    """
+    Call Cloudflare AI Workers (FLUX.1-schnell).
+    Returns a base64-encoded JPEG string (already encoded by Cloudflare).
+    """
+    cf_token   = os.environ.get("CF_API_TOKEN", "")
+    cf_account = os.environ.get("CF_ACCOUNT_ID", "")
+    resp = await client.post(
+        f"https://api.cloudflare.com/client/v4/accounts/{cf_account}"
+        f"/ai/run/@cf/black-forest-labs/flux-1-schnell",
+        json={"prompt": prompt, "num_steps": 4},
+        headers={"Authorization": f"Bearer {cf_token}"},
+        timeout=90.0,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if not body.get("success"):
+        raise ValueError(f"CF API error: {body.get('errors', body)}")
+    b64 = body["result"]["image"]   # CF returns base64-encoded JPEG
+    return b64
+
+
+async def _call_huggingface(prompt: str, client: httpx.AsyncClient) -> str:
+    """
+    Call HuggingFace Inference API (FLUX.1-schnell).
+    Returns a base64-encoded PNG string.
+    """
+    import base64
+
+    hf_token = os.environ.get("HF_TOKEN", "")
+    resp = await client.post(
+        "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+        json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
+        headers={"Authorization": f"Bearer {hf_token}"},
+        timeout=90.0,
+    )
+    resp.raise_for_status()
+    ct = resp.headers.get("content-type", "")
+    if "image" not in ct:
+        raise ValueError(f"HF returned non-image content-type={ct!r}: {resp.text[:200]}")
+    return base64.b64encode(resp.content).decode()
+
+
 async def _generate_image(prompt: str) -> str:
     """
-    Call LiteLLM's own /v1/images/generations endpoint so the HF → CF fallback
-    and Langfuse tracing are handled by the router, not inlined here.
-    Returns a markdown image tag or an error message.
+    Generate an image via Cloudflare FLUX.1-schnell with HuggingFace fallback.
+    Providers are called directly — LiteLLM proxy does not support HF/CF image
+    generation natively. Returns a markdown image tag or an error message.
     """
-    master_key = os.environ.get("LITELLM_MASTER_KEY", "")
-    try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            resp = await client.post(
-                "http://localhost:4000/v1/images/generations",
-                json={"model": _IMAGE_MODEL, "prompt": prompt, "n": 1},
-                headers={"Authorization": f"Bearer {master_key}"},
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            img = body["data"][0]
-            if img.get("url"):
-                return f"![generated image]({img['url']})"
-            if img.get("b64_json"):
-                return f"![generated image](data:image/png;base64,{img['b64_json']})"
-    except httpx.HTTPStatusError as exc:
-        return f"Image generation failed (HTTP {exc.response.status_code}): {exc.response.text[:200]}"
-    except Exception as exc:
-        return f"Image generation failed: {exc}"
-    return "Image generation returned no result."
+    async with httpx.AsyncClient() as client:
+        last_exc: Exception | None = None
+        for fn, mime in (
+            (_call_cloudflare, "image/jpeg"),
+            (_call_huggingface, "image/png"),
+        ):
+            try:
+                b64 = await fn(prompt, client)
+                return f"![generated image](data:{mime};base64,{b64})"
+            except Exception as exc:
+                last_exc = exc
+        return f"Image generation failed: {last_exc}"
 
 
 # ── callback ──────────────────────────────────────────────────────────────────
@@ -109,7 +144,8 @@ class UnifiedRouter(litellm.CustomLogger):
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         # Image generation requests from LibreChat's DALL-E UI already go to
         # /v1/images/generations — no interception needed.
-        if call_type != "completion":
+        # call_type is "acompletion" for async chat completions; accept both.
+        if call_type not in ("completion", "acompletion"):
             return data
 
         requested = data.get("model", "")
@@ -126,14 +162,10 @@ class UnifiedRouter(litellm.CustomLogger):
 
         # ── 1. Image routing ──────────────────────────────────────────────────
         if _IMAGE_RE.search(last_user):
-            # Launch image generation concurrently; do not await here so the
-            # cheap LLM call runs in parallel and the hook returns immediately.
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
-            # Cheap background LLM call — its response will be replaced in the
-            # post-call hook once image generation completes.
             data["model"]      = _ENGLISH_MODEL
             data["max_tokens"] = 1
-            data["stream"]     = False   # must be non-streaming for post-hook intercept
+            data["stream"]     = False
             return data
 
         # ── 2. Language routing ───────────────────────────────────────────────
@@ -151,7 +183,7 @@ class UnifiedRouter(litellm.CustomLogger):
             return response
 
         task = _image_tasks.pop(call_id)
-        img_markdown = await task   # wait for image generation to finish
+        img_markdown = await task
 
         try:
             response.choices[0].message.content = img_markdown

@@ -331,7 +331,7 @@ render_litellm() {
     local lr_enabled
     lr_enabled="$(qs '.layers.gateway.options.language_routing.enabled')"
     if [ "$lr_enabled" = "true" ]; then
-      printf '  custom_callbacks: [/app/callbacks.py]\n'
+      printf '  callbacks: [callbacks.language_router]\n'
     fi
 
     # ── router_settings — only emit fallbacks whose models are all present ──
