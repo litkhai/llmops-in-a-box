@@ -70,15 +70,19 @@ for lang, msg in [
 - Applications do not change when models do. That is the migration story in one line.
 - Fallback is automatic: if one provider is unavailable, LiteLLM retries on the other. The client always gets a response.
 
-### Image generation: HuggingFace → Cloudflare fallback
+### Image generation: Cloudflare → HuggingFace fallback
 
-Open the **DALL-E UI** in LibreChat (the image icon — no model switch needed)
-and generate an image. The gateway routes the request to HuggingFace
-FLUX.1-schnell with a Cloudflare Workers AI fallback.
+Type an image-intent message directly in the `auto` chat window — no model switch, no separate UI. The `UnifiedRouter` callback detects image keywords in the message and calls Cloudflare Workers AI (FLUX.1-schnell) directly, returning the image inline in the chat response.
+
+```
+파란색 배경에 고양이 그림 그려줘
+generate an image of a mountain landscape at sunrise
+```
 
 **Talking points**
 
-- The chat model picker never changes — `auto` is the only choice. Modality switching is handled by the UI and gateway together.
+- The chat model picker never changes — `auto` is the only choice. Text, language detection, and image generation are all handled by one callback in the gateway.
+- Cloudflare Workers AI is the primary provider; HuggingFace FLUX.1-schnell is the fallback.
 - Both providers are free tier. No credit card, no GPU. The same fallback pattern scales to paid providers.
 
 Include in the run:
@@ -98,7 +102,7 @@ Open Langfuse. Spend the most time here.
 |---|---|
 | **Traces** list | Every request — chat and image, both providers — in one pane. Nothing was instrumented in the application. |
 | A chat trace | Full prompt and completion, latency, token counts, **computed cost**. |
-| An image trace | Same trace format; `model` shows `dall-e-3` or `dall-e-3-cf` (Cloudflare fallback), making the routing decision visible. |
+| An image trace | Same trace format; `model` shows `claude-sonnet` (the 1-token placeholder call used while image generates in background), making the routing decision visible. |
 | The language routing trace | `model` shows `gpt-4o` or `claude-sonnet` — the gateway's routing decision is captured, not just the response. |
 | Model comparison | Cost and latency side by side — this is what makes self-hosted vs. API economics decidable rather than theoretical. |
 | The error trace | Failures are traced too. Most observability setups only capture successes; you find out about failures from users. |

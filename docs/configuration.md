@@ -217,20 +217,19 @@ traces.
 ```mermaid
 flowchart TD
     LC["LibreChat"]
-    G["LiteLLM Gateway"]
+    G["LiteLLM Gateway\n(UnifiedRouter callback)"]
     LF["Langfuse"]
     GPT["gpt-4o\n(OpenAI)"]
     CS["claude-sonnet\n(Anthropic)"]
-    HF["HuggingFace\nFLUX.1-schnell"]
-    CF["Cloudflare Workers AI\nFLUX.1-schnell"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
+    HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
 
     LC -- "chat · model=auto" --> G
-    LC -- "DALL-E UI · model=dall-e-3" --> G
 
+    G -- "image keywords detected" --> CF
+    CF -. "error" .-> HF
     G -- "English (Latin script)" --> GPT
     G -- "Korean / non-Latin" --> CS
-    G -- "primary" --> HF
-    G -- "fallback" --> CF
 
     G -- "success + failure traces" --> LF
 ```
@@ -251,7 +250,7 @@ LiteLLM routes chat requests automatically by the dominant script of the last us
 
 Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
 
-The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Image generation requests (`call_type != "completion"`) bypass the callback entirely — `dall-e-3` is never rewritten.
+The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely — `dall-e-3` is never rewritten by language routing.
 
 **Fallback:** `claude-sonnet → gpt-4o` and `gpt-4o → claude-sonnet`. If one provider is unavailable, LiteLLM retries on the other. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
 
@@ -276,7 +275,7 @@ layers:
             to: [claude-sonnet]
 ```
 
-When `language_routing.enabled` is `true`, `render` adds `custom_callbacks: [/app/callbacks.py]` to `litellm_settings` in the generated config, and the callback file is mounted read-only into the `litellm` container.
+When `language_routing.enabled` is `true`, `render` adds `callbacks: [callbacks.language_router]` to `litellm_settings` in the generated config, and the callback file is mounted read-only into the `litellm` container at `/app/callbacks.py`.
 
 To disable routing and send all requests to a single model, set `language_routing.enabled: false` and re-render.
 
@@ -284,26 +283,25 @@ To disable routing and send all requests to a single model, set `language_routin
 
 ## Image generation
 
-LibreChat has a dedicated DALL-E image generation UI — separate from the chat
-model picker, which shows only `auto`. When the user opens the DALL-E interface,
-LibreChat sends a request to LiteLLM's `/v1/images/generations` endpoint with
-`model: dall-e-3`. LiteLLM maps it to HuggingFace FLUX.1-schnell and falls
-back to Cloudflare Workers AI automatically. The success/failure callback sends
-a trace to Langfuse regardless of which provider served the request.
+Image generation is triggered directly from chat — type an image-intent message (e.g. "그려줘", "draw …", "generate an image of …") in the `auto` chat window and the `UnifiedRouter` callback detects the intent, calls Cloudflare Workers AI directly, and replaces the LLM response with the generated image before it reaches LibreChat.
 
 ```mermaid
 flowchart LR
-    UI["LibreChat\nDALL-E UI"]
-    G["LiteLLM Gateway\n/v1/images/generations"]
-    HF["HuggingFace\nFLUX.1-schnell\n(primary)"]
-    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(fallback)"]
+    LC["LibreChat\nchat (auto)"]
+    CB["UnifiedRouter\npre_call_hook"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
+    HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
     LF["Langfuse trace"]
 
-    UI -- "model: dall-e-3" --> G
-    G -- "success" --> HF
-    HF -. "rate limit / error" .-> CF
-    G -- "trace" --> LF
+    LC -- "image keywords\nin message" --> CB
+    CB -- "asyncio.Task" --> CF
+    CF -. "error" .-> HF
+    CB -- "1-token LLM call\n(placeholder)" --> LC
+    CB -- "post_call_hook:\nreplace with image" --> LC
+    CB -- "trace" --> LF
 ```
+
+The callback calls the provider APIs directly (LiteLLM's built-in HuggingFace / Cloudflare image generation does not function correctly). Cloudflare Workers AI returns a base64-encoded JPEG; HuggingFace is a secondary fallback (unreachable from some networks).
 
 Image generation is enabled by default when the credentials are present.
 The relevant `stack.yaml` block:

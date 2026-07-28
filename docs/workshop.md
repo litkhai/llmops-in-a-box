@@ -97,24 +97,16 @@ latency, token, and cost data. Only the model alias changed in the client.
 
 ## 5. Generate an image
 
-The chat model picker shows only `auto` — there is no image model to select.
-Image generation is a separate path: click the **image icon** (DALL-E UI) in
-the LibreChat interface and enter a prompt such as:
+The chat model picker shows only `auto`. Image generation is triggered directly from chat — no separate UI required. Type a message containing image-intent keywords and the `UnifiedRouter` callback detects the intent automatically:
 
-```
-A photorealistic landscape with mountains and a river at sunrise
-```
+- Korean: `파란색 배경에 고양이 그림 그려줘`
+- English: `generate an image of a mountain landscape at sunrise`
 
-LibreChat sends the request to LiteLLM's `/v1/images/generations` endpoint
-with `model: dall-e-3`. LiteLLM routes to HuggingFace FLUX.1-schnell (primary)
-and falls back to Cloudflare Workers AI automatically if the primary fails.
-The routing is transparent — LibreChat receives an image regardless of which
-provider served it.
+The callback calls Cloudflare Workers AI (FLUX.1-schnell) directly, and the image appears inline in the chat response as a base64-encoded JPEG.
 
-**Checkpoint:** open Langfuse → **Tracing**. An image generation trace should
-appear alongside the chat traces in the same project. The `model` field shows
-`dall-e-3` (HuggingFace path) or `dall-e-3-cf` (Cloudflare fallback path),
-making the routing decision visible without any instrumentation in LibreChat.
+**Checkpoint:** open Langfuse → **Tracing**. A trace should appear for both the cheap 1-token LLM call (placeholder) and the image generation, making the routing decision observable without any instrumentation in LibreChat.
+
+The `model` field in the routing trace shows `claude-sonnet` (the placeholder call used while the image generates in the background).
 
 If neither token is configured, image generation requests return an error;
 the chat path is unaffected.

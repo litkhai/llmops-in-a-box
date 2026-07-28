@@ -5,7 +5,7 @@ A composable LLMOps reference stack built around a single gateway:
 - **LiteLLM** for model routing and cost tracking
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
-- **OpenAI and Anthropic** for chat, and **HuggingFace / Cloudflare** for image generation in the current Phase 1 stack
+- **OpenAI and Anthropic** for chat, and **Cloudflare / HuggingFace** for image generation in the current Phase 1 stack
 - **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
 
 The phases are a build order rather than a menu. The destination is an agent
@@ -32,7 +32,7 @@ names, and deployment targets.
 |---|---|
 | Phase 1 Docker stack | Runnable |
 | OpenAI / Anthropic requests through LiteLLM | Requires at least one provider key |
-| Image generation (HuggingFace FLUX.1-schnell → Cloudflare fallback) | Runnable; free-tier tokens optional |
+| Image generation (Cloudflare FLUX.1-schnell → HuggingFace fallback) | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | Runnable |
 | AWS EC2 target | Runnable |
 | Phases 2–5 | Not built yet |
@@ -79,17 +79,16 @@ The shape the stack is built toward, with the phase that delivers each path:
 ```text
 LibreChat / applications
         │
-        ├─ chat (model: auto)
-        │
-        └─ image (DALL-E UI)
+        └─ chat (model: auto)
                │
                ▼
 LiteLLM Gateway ──────────── traces ─────────▶ Langfuse
-        │                                          │
-        ├─ auto · English  ──▶ gpt-4o    p.1    ClickHouse · Postgres
-        ├─ auto · Korean   ──▶ claude-sonnet       Redis · MinIO
-        ├─ dall-e-3        ──▶ HuggingFace FLUX.1-schnell
-        │   fallback       ──▶ Cloudflare FLUX.1-schnell
+(UnifiedRouter callback)                           │
+        │                                       ClickHouse · Postgres
+        ├─ auto · English text  ──▶ gpt-4o        Redis · MinIO
+        ├─ auto · Korean text   ──▶ claude-sonnet
+        ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
+        │                fallback ─▶ HuggingFace FLUX.1-schnell
         ├─▶ MCP tools                   phase 2
         └─▶ vLLM on RunPod              phase 3
                  │
@@ -98,9 +97,9 @@ LiteLLM Gateway ──────────── traces ──────�
 ```
 
 Phase 1 runs today. One model alias (`auto`) in the chat UI routes to the right
-provider based on language script. Image generation is a separate path —
-LibreChat's DALL-E UI sends requests through the same LiteLLM gateway with a
-HuggingFace primary and Cloudflare fallback. All paths emit traces to Langfuse.
+provider: English text → gpt-4o, Korean → claude-sonnet, image-intent messages
+→ Cloudflare FLUX.1-schnell (with HuggingFace as fallback) — all via a single
+`UnifiedRouter` callback, all emitting traces to Langfuse.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model
 alias and sends success and failure telemetry to Langfuse. The model catalog is
