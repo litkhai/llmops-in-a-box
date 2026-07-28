@@ -28,8 +28,13 @@ added to p99 latency.
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import os
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import Dict
 
 import httpx
@@ -113,24 +118,96 @@ async def _call_huggingface(prompt: str, client: httpx.AsyncClient) -> str:
     return base64.b64encode(resp.content).decode()
 
 
+def _minio_put_url(bucket: str, key: str, img_bytes: bytes) -> str:
+    """
+    Upload image bytes to MinIO using AWS SigV4 (pure stdlib).
+    Returns the public URL for the uploaded object.
+    """
+    access_key = os.environ.get("MINIO_ROOT_USER", "admin")
+    secret_key  = os.environ.get("MINIO_ROOT_PASSWORD", "")
+    endpoint    = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
+    public_host = os.environ.get("MINIO_PUBLIC_HOST", "")
+
+    now = datetime.now(timezone.utc)
+    datestamp  = now.strftime("%Y%m%d")
+    amzdate    = now.strftime("%Y%m%dT%H%M%SZ")
+    region, service = "us-east-1", "s3"
+
+    payload_hash = hashlib.sha256(img_bytes).hexdigest()
+    content_type = "image/jpeg"
+
+    headers_to_sign = {
+        "content-type": content_type,
+        "host": endpoint.split("//", 1)[1],
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amzdate,
+    }
+    signed_headers = ";".join(sorted(headers_to_sign))
+    canonical_headers = "".join(f"{k}:{v}\n" for k, v in sorted(headers_to_sign.items()))
+    canonical_request = "\n".join([
+        "PUT", f"/{bucket}/{key}", "",
+        canonical_headers, signed_headers, payload_hash,
+    ])
+
+    credential_scope = f"{datestamp}/{region}/{service}/aws4_request"
+    string_to_sign = "\n".join([
+        "AWS4-HMAC-SHA256", amzdate, credential_scope,
+        hashlib.sha256(canonical_request.encode()).hexdigest(),
+    ])
+
+    def _sign(key: bytes, msg: str) -> bytes:
+        return hmac.new(key, msg.encode(), hashlib.sha256).digest()
+
+    signing_key = _sign(_sign(_sign(_sign(
+        f"AWS4{secret_key}".encode(), datestamp),
+        region), service), "aws4_request")
+    signature = hmac.new(signing_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
+
+    auth = (
+        f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope},"
+        f" SignedHeaders={signed_headers}, Signature={signature}"
+    )
+
+    import urllib.request
+    req = urllib.request.Request(
+        f"{endpoint}/{bucket}/{key}",
+        data=img_bytes,
+        method="PUT",
+        headers={
+            "Authorization": auth,
+            "Content-Type": content_type,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amzdate,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        if r.status not in (200, 201):
+            raise RuntimeError(f"MinIO PUT {r.status}")
+
+    base = public_host or endpoint
+    return f"{base}/{bucket}/{key}"
+
+
 async def _generate_image(prompt: str) -> str:
     """
-    Generate an image via Cloudflare FLUX.1-schnell with HuggingFace fallback.
-    Providers are called directly — LiteLLM proxy does not support HF/CF image
-    generation natively. Returns a markdown image tag or an error message.
+    Generate an image via Cloudflare FLUX.1-schnell (HuggingFace fallback),
+    upload to MinIO, and return a markdown image tag with a public URL.
     """
     async with httpx.AsyncClient() as client:
         last_exc: Exception | None = None
-        for fn, mime in (
-            (_call_cloudflare, "image/jpeg"),
-            (_call_huggingface, "image/png"),
-        ):
+        for fn in (_call_cloudflare, _call_huggingface):
             try:
                 b64 = await fn(prompt, client)
-                return f"![generated image](data:{mime};base64,{b64})"
+                img_bytes = base64.b64decode(b64)
+                key = f"generated/{uuid.uuid4().hex}.jpg"
+                loop = asyncio.get_event_loop()
+                url = await loop.run_in_executor(
+                    None, _minio_put_url, "images", key, img_bytes
+                )
+                return f"![generated image]({url})"
             except Exception as exc:
                 last_exc = exc
-        return f"Image generation failed: {last_exc}"
+    return f"Image generation failed: {last_exc}"
 
 
 # ── callback ──────────────────────────────────────────────────────────────────

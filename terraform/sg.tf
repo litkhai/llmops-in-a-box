@@ -36,6 +36,14 @@ resource "aws_security_group" "stack" {
   }
 
   ingress {
+    from_port   = 9002
+    to_port     = 9002
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_cidr]
+    description = "MinIO API (generated image hosting)"
+  }
+
+  ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"

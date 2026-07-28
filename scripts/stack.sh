@@ -458,15 +458,21 @@ render_caddy() {
     if [ -n "$email" ]; then
       printf '{\n    email %s\n}\n\n' "$email"
     fi
+    local sub_media
+    sub_media="$(qs ".targets.\"aws-ec2\".domain.subdomains.media" 2>/dev/null || true)"
+    [ -n "$sub_media" ] || sub_media="media"
+
     printf '%s.%s {\n    reverse_proxy librechat:3080\n    encode gzip\n}\n\n' \
       "$sub_librechat" "$base"
     printf '%s.%s {\n    reverse_proxy langfuse-web:3000\n    encode gzip\n}\n\n' \
       "$sub_langfuse" "$base"
     printf '%s.%s {\n    reverse_proxy litellm:4000\n    encode gzip\n}\n\n' \
       "$sub_litellm" "$base"
+    printf '%s.%s {\n    reverse_proxy minio:9000\n    encode gzip\n}\n\n' \
+      "$sub_media" "$base"
   } > "$out"
 
-  ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")  (${sub_librechat}.${base}, ${sub_langfuse}.${base}, ${sub_litellm}.${base})"
+  ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")  (${sub_librechat}.${base}, ${sub_langfuse}.${base}, ${sub_litellm}.${base}, ${sub_media}.${base})"
 }
 
 cmd_render() {
