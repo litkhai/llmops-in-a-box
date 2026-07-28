@@ -81,6 +81,7 @@ nav:
       - Configuration: configuration.md
   - Operate:
       - Deployment targets: deployment.md
+      - Troubleshooting: troubleshooting.md
   - Present:
       - Demo flow: demo-flow.md
 

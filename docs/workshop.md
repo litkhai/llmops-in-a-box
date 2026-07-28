@@ -102,11 +102,9 @@ The chat model picker shows only `auto`. Image generation is triggered directly 
 - Korean: `파란색 배경에 고양이 그림 그려줘`
 - English: `generate an image of a mountain landscape at sunrise`
 
-The callback calls Cloudflare Workers AI (FLUX.1-schnell) directly, and the image appears inline in the chat response as a base64-encoded JPEG.
+The callback calls Cloudflare Workers AI (FLUX.1-schnell) directly. The generated image is stored in MinIO and the streaming hook replaces the 1-token LLM response with a markdown image link. LibreChat renders the image inline in the chat.
 
-**Checkpoint:** open Langfuse → **Tracing**. A trace should appear for both the cheap 1-token LLM call (placeholder) and the image generation, making the routing decision observable without any instrumentation in LibreChat.
-
-The `model` field in the routing trace shows `claude-sonnet` (the placeholder call used while the image generates in the background).
+**Checkpoint:** open Langfuse → **Tracing**. A trace should appear for the 1-token LLM placeholder call made while the image generates in the background. The `model` field shows `claude-sonnet` (the placeholder call). The chat response contains a markdown image rendered inline by LibreChat.
 
 If neither token is configured, image generation requests return an error;
 the chat path is unaffected.

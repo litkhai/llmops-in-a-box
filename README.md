@@ -5,7 +5,7 @@ A composable LLMOps reference stack built around a single gateway:
 - **LiteLLM** for model routing and cost tracking
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
-- **OpenAI and Anthropic** for chat, and **Cloudflare / HuggingFace** for image generation in the current Phase 1 stack
+- **OpenAI and Anthropic** for chat, **Cloudflare / HuggingFace** for image generation, and **MinIO** for image storage in the current Phase 1 stack
 - **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
 
 The phases are a build order rather than a menu. The destination is an agent
@@ -89,6 +89,7 @@ LiteLLM Gateway ──────────── traces ──────�
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
         │                fallback ─▶ HuggingFace FLUX.1-schnell
+        │                  stores ─▶ MinIO → media.<domain>
         ├─▶ MCP tools                   phase 2
         └─▶ vLLM on RunPod              phase 3
                  │
@@ -177,6 +178,7 @@ not be edited directly. Change `stack.yaml`, then run:
 | See the end state and the build order | [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) |
 | Change layers or models | [Configuration](https://litkhai.github.io/llmops-in-a-box/configuration/) |
 | Operate a deployment target | [Deployment](https://litkhai.github.io/llmops-in-a-box/deployment/) |
+| Fix a known issue | [Troubleshooting](https://litkhai.github.io/llmops-in-a-box/troubleshooting/) |
 | Present the stack | [Demo flow](https://litkhai.github.io/llmops-in-a-box/demo-flow/) |
 
 ## License

@@ -123,6 +123,7 @@ subdomain at the EC2 instance's public IP:
 | `chat.<your-domain>` | EC2 public IP |
 | `langfuse.<your-domain>` | EC2 public IP |
 | `litellm.<your-domain>` | EC2 public IP |
+| `media.<your-domain>` | EC2 public IP |
 
 **b. Set domain config interactively:**
 
@@ -256,6 +257,7 @@ production service.
 | LibreChat | `3080` | `chat.<domain>` |
 | Langfuse | `3000` | `langfuse.<domain>` |
 | LiteLLM | `4000` | `litellm.<domain>` |
+| MinIO (images) | `9002` | `media.<domain>` |
 
 Ports 80 and 443 are open to `0.0.0.0/0` for HTTPS. The remaining ports use
 `allowed_cidr` (default `0.0.0.0/0`; each service has its own authentication).
@@ -374,10 +376,9 @@ gateway configuration, not the client protocol.
     ```
 
 ??? question "Image generation returns an error"
-    LiteLLM routes image generation requests to HuggingFace first. If
-    HuggingFace hits its rate limit, LiteLLM automatically retries on
-    Cloudflare Workers AI. No action is required for a transient rate limit —
-    the fallback is transparent to LibreChat.
+    The `UnifiedRouter` callback calls Cloudflare Workers AI first. If
+    Cloudflare fails, it falls back to HuggingFace. No action is required for
+    a transient error — the fallback is transparent to LibreChat.
 
     If both providers fail, verify that `HF_TOKEN`, `CF_API_TOKEN`, and
     `CF_ACCOUNT_ID` are present in the running container:

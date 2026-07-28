@@ -223,11 +223,14 @@ flowchart TD
     CS["claude-sonnet\n(Anthropic)"]
     CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
     HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
+    MN["MinIO\n(media.<domain>)"]
 
     LC -- "chat · model=auto" --> G
 
     G -- "image keywords detected" --> CF
     CF -. "error" .-> HF
+    CF -- "store" --> MN
+    HF -- "store" --> MN
     G -- "English (Latin script)" --> GPT
     G -- "Korean / non-Latin" --> CS
 
@@ -250,7 +253,7 @@ LiteLLM routes chat requests automatically by the dominant script of the last us
 
 Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
 
-The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely — `dall-e-3` is never rewritten by language routing.
+The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely.
 
 **Fallback:** `claude-sonnet → gpt-4o` and `gpt-4o → claude-sonnet`. If one provider is unavailable, LiteLLM retries on the other. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
 
@@ -291,17 +294,20 @@ flowchart LR
     CB["UnifiedRouter\npre_call_hook"]
     CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
     HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
+    MN["MinIO\n(media.<domain>)"]
     LF["Langfuse trace"]
 
     LC -- "image keywords\nin message" --> CB
     CB -- "asyncio.Task" --> CF
     CF -. "error" .-> HF
+    CF -- "store image" --> MN
+    HF -- "store image" --> MN
     CB -- "1-token LLM call\n(placeholder)" --> LC
-    CB -- "post_call_hook:\nreplace with image" --> LC
+    CB -- "streaming_hook:\nreplace with\n![img](media URL)" --> LC
     CB -- "trace" --> LF
 ```
 
-The callback calls the provider APIs directly (LiteLLM's built-in HuggingFace / Cloudflare image generation does not function correctly). Cloudflare Workers AI returns a base64-encoded JPEG; HuggingFace is a secondary fallback (unreachable from some networks).
+The callback calls the provider APIs directly (LiteLLM's built-in HuggingFace / Cloudflare image generation does not function correctly). Cloudflare Workers AI is the primary provider; HuggingFace is a secondary fallback (unreachable from some networks). The generated image is stored in MinIO and served via the `media.<domain>` subdomain. The `async_post_call_streaming_iterator_hook` drains the 1-token LLM stream and replaces it with a streaming SSE chunk containing the markdown image link. LibreChat renders the image inline.
 
 Image generation is enabled by default when the credentials are present.
 The relevant `stack.yaml` block:
@@ -312,7 +318,6 @@ layers:
     options:
       image_generation:
         enabled: true
-        dalle_alias: dall-e-3
         providers:
           huggingface:
             model: black-forest-labs/FLUX.1-schnell
@@ -323,14 +328,9 @@ layers:
             account_id_env: CF_ACCOUNT_ID
 ```
 
-`render` translates this into two entries in `litellm_config.yaml` — `dall-e-3`
-(primary) and `dall-e-3-cf` (fallback) — plus a fallback rule that chains them.
-LibreChat only sees `dall-e-3`; the `-cf` alias is invisible to the user.
-
 The credentials (`HF_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`) are optional.
-If absent, `litellm_config.yaml` still contains the model entries but every
-request fails with an API error. To disable cleanly, set
-`image_generation.enabled: false` and re-render.
+If absent, image generation fails with an API error; the chat path is unaffected.
+To disable cleanly, set `image_generation.enabled: false` and re-render.
 
 See [Credentials — Image generation](credentials.md#image-generation-free-tier)
 for token acquisition steps.
@@ -358,6 +358,7 @@ DNS setup — create `A` records for each subdomain pointing at the EC2 public I
 | `chat.<domain>` | LibreChat |
 | `langfuse.<domain>` | Langfuse |
 | `litellm.<domain>` | LiteLLM |
+| `media.<domain>` | MinIO (image storage) |
 
 The root domain is not touched — it can point elsewhere (e.g. a homepage).
 
@@ -398,6 +399,7 @@ targets:
         litellm: litellm
         langfuse: langfuse
         librechat: chat
+        media: media
 ```
 
 ---

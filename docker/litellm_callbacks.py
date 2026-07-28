@@ -242,7 +242,8 @@ class UnifiedRouter(litellm.CustomLogger):
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
             data["model"]      = _ENGLISH_MODEL
             data["max_tokens"] = 1
-            data["stream"]     = False
+            # stream stays as-is — streaming calls use async_post_call_streaming_iterator_hook,
+            # non-streaming calls use async_post_call_success_hook.
             return data
 
         # ── 2. Language routing ───────────────────────────────────────────────
@@ -268,6 +269,52 @@ class UnifiedRouter(litellm.CustomLogger):
             pass
 
         return response
+
+    async def async_post_call_streaming_iterator_hook(self, user_api_key_dict, response, request_data):
+        from litellm.types.utils import ModelResponseStream, StreamingChoices, Delta
+
+        call_id = str(request_data.get("litellm_call_id") or id(request_data))
+
+        if call_id not in _image_tasks:
+            async for chunk in response:
+                yield chunk
+            return
+
+        # Drain the 1-token LLM stream without forwarding to client.
+        try:
+            async for _ in response:
+                pass
+        except Exception:
+            pass
+
+        task = _image_tasks.pop(call_id)
+        try:
+            img_markdown = await task
+        except Exception as exc:
+            img_markdown = f"Image generation failed: {exc}"
+
+        import time as _time
+        now = int(_time.time())
+        chunk_id = f"chatcmpl-img-{uuid.uuid4().hex[:12]}"
+
+        yield ModelResponseStream(
+            id=chunk_id,
+            created=now,
+            choices=[StreamingChoices(
+                index=0,
+                delta=Delta(role="assistant", content=img_markdown),
+                finish_reason=None,
+            )],
+        )
+        yield ModelResponseStream(
+            id=chunk_id,
+            created=now,
+            choices=[StreamingChoices(
+                index=0,
+                delta=Delta(),
+                finish_reason="stop",
+            )],
+        )
 
     async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
         # Clean up the image task on LLM failure so the dict does not leak.

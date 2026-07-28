@@ -72,7 +72,7 @@ for lang, msg in [
 
 ### Image generation: Cloudflare → HuggingFace fallback
 
-Type an image-intent message directly in the `auto` chat window — no model switch, no separate UI. The `UnifiedRouter` callback detects image keywords in the message and calls Cloudflare Workers AI (FLUX.1-schnell) directly, returning the image inline in the chat response.
+Type an image-intent message directly in the `auto` chat window — no model switch, no separate UI. The `UnifiedRouter` callback detects image keywords in the message, calls Cloudflare Workers AI (FLUX.1-schnell) directly, stores the generated image in MinIO, and injects a markdown image link into the chat response. LibreChat renders the image inline.
 
 ```
 파란색 배경에 고양이 그림 그려줘
