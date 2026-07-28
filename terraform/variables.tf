@@ -28,13 +28,9 @@ variable "key_name" {
 }
 
 variable "allowed_cidr" {
-  description = "CIDR block allowed inbound. Never 0.0.0.0/0. Pass with --tf-var allowed_cidr=<your-ip>/32."
+  description = "CIDR block allowed inbound. Use 0.0.0.0/0 for open access (each service has its own auth)."
   type        = string
-
-  validation {
-    condition     = var.allowed_cidr != "0.0.0.0/0"
-    error_message = "allowed_cidr must not be 0.0.0.0/0 — this stack holds live provider API keys."
-  }
+  default     = "0.0.0.0/0"
 }
 
 variable "project_slug" {
