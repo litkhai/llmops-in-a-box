@@ -1650,6 +1650,52 @@ cmd_secrets_audit() {
   else die "secrets audit FAILED — do not commit until the ✗ items are fixed"; fi
 }
 
+cmd_secrets_push() {
+  # Push all set Phase 1 credentials to SSM Parameter Store.
+  # The EC2 bootstrap script pulls them from SSM at first boot.
+  # Requires: aws CLI configured with ssm:PutParameter on the path prefix.
+  command -v aws >/dev/null 2>&1 \
+    || die "aws CLI not found — install: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
+
+  local region prefix s val path pushed=0 skipped=0
+  region="$(qs ".targets.\"aws-ec2\".vars.region")"
+  prefix="$(qs ".targets.\"aws-ec2\".vars.ssm_path_prefix")"
+  [ -n "$region" ] || region="ap-northeast-2"
+  [ -n "$prefix" ] || prefix="/sais/phase-1"
+
+  load_env
+  info "Pushing secrets to SSM  ${C_DIM}region=$region  prefix=$prefix${C_RST}"
+  warn "Parameters are encrypted with the default AWS KMS key"
+
+  for s in $(q '.secrets.required[]') $(q '.secrets.optional."1"[]'); do
+    val="${!s:-}"
+    if [ -z "$val" ]; then
+      warn "$(printf '%-34s' "$s") unset — skipping"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    path="$prefix/$s"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "  [dry-run] aws ssm put-parameter --name $path --type SecureString"
+    else
+      aws ssm put-parameter \
+        --region "$region" \
+        --name   "$path" \
+        --value  "$val" \
+        --type   SecureString \
+        --overwrite \
+        --no-cli-pager >/dev/null
+      ok "$(printf '%-34s' "$s") → $path"
+    fi
+    pushed=$((pushed + 1))
+  done
+
+  say ""
+  say "  pushed=$pushed  skipped=$skipped"
+  [ "$skipped" -eq 0 ] || warn "skipped credentials will not be available on EC2 — run 'secrets status' to review"
+  [ "$DRY_RUN" -eq 0 ] && say "  ${C_DIM}Verify: aws ssm get-parameters-by-path --region $region --path $prefix --with-decryption${C_RST}"
+}
+
 cmd_secrets() {
   case "${SECRETS_SUB:-}" in
     init)              cmd_secrets_init ;;
@@ -1660,7 +1706,8 @@ cmd_secrets() {
     validate)          cmd_secrets_validate ;;
     write)             cmd_secrets_write ;;
     audit)             cmd_secrets_audit ;;
-    *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit>" ;;
+    push)              cmd_secrets_push ;;
+    *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit|push>" ;;
   esac
 }
 
@@ -1756,6 +1803,26 @@ cmd_up() {
       done < <(printf '%s' "$TF_VARS")
       run terraform -chdir="$d" init -input=false
       run terraform -chdir="$d" apply -input=false ${tfargs[@]+"${tfargs[@]}"}
+      # After apply, the EC2 bootstrap script installs Docker and starts the
+      # stack. Poll LiteLLM until it responds or the timeout expires.
+      if [ "$DRY_RUN" -eq 0 ]; then
+        local host elapsed=0 wait_to=300 code
+        host="$(target_host)"
+        info "Waiting for bootstrap on $host (up to ${wait_to}s)"
+        while [ "$elapsed" -lt "$wait_to" ]; do
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+            "http://$host:4000/health/liveliness" 2>/dev/null || true)"
+          case "$code" in
+            2*|3*) ok "LiteLLM responded ($code) after ${elapsed}s"; break ;;
+          esac
+          sleep 10
+          elapsed=$((elapsed + 10))
+        done
+        if [ "$elapsed" -ge "$wait_to" ]; then
+          warn "stack did not respond within ${wait_to}s"
+          warn "check: ./scripts/stack.sh ssh --target $TARGET"
+        fi
+      fi
       ;;
     *) die "target kind '$kind' is not supported yet" ;;
   esac
@@ -1901,6 +1968,20 @@ cmd_smoke_test() {
   else die "smoke test failed — fix the ✗ items above"; fi
 }
 
+cmd_ssh() {
+  resolve_defaults
+  local kind; kind="$(qs ".targets.\"$TARGET\".kind")"
+  [ "$kind" = "terraform" ] || die "'ssh' is only available for terraform targets (got: $TARGET)"
+  local host
+  host="$(target_host)"
+  [ -n "$host" ] || die "could not resolve host — run './scripts/stack.sh urls --target $TARGET' after terraform apply"
+  if [ -n "${SSH_KEY_PATH:-}" ]; then
+    run ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@$host" "${EXTRA_ARGS:-}"
+  else
+    run ssh -o StrictHostKeyChecking=no "ec2-user@$host" "${EXTRA_ARGS:-}"
+  fi
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 usage() {
   cat <<EOF
@@ -1919,6 +2000,7 @@ ${C_B}COMMANDS${C_RST}
   secrets validate   Run offline format validation without showing values
   secrets write   Generate .env from secrets/credentials.yaml
   secrets audit   Verify secrets cannot reach git / Docker / AI tool indexes
+  secrets push    Push set credentials to SSM Parameter Store (for aws-ec2 target)
   phases      Show the build-out phases and which one is current
   config      Show the resolved stack for the selected target/profile
   models      Table of the models this profile exposes
@@ -1929,6 +2011,7 @@ ${C_B}COMMANDS${C_RST}
   smoke-test  Send a test request end-to-end and verify the trace pipeline
   urls        Print the endpoint list
   logs        Follow compose logs
+  ssh         SSH into the aws-ec2 target (set SSH_KEY_PATH or use ssh-agent)
 
 ${C_B}FLAGS${C_RST}
   -t, --target <name>    Deployment target (default: stack.yaml defaults.target)
@@ -1963,13 +2046,13 @@ main() {
   # `secrets` takes a bare subcommand before any flags.
   if [ "$cmd" = "secrets" ]; then
     case "${1:-}" in
-      init|setup|set|generate|gen|status|validate|write|audit)
+      init|setup|set|generate|gen|status|validate|write|audit|push)
         SECRETS_SUB="$1"; shift
         if [ "$SECRETS_SUB" = "set" ] && [ $# -gt 0 ]; then
           case "$1" in -*) : ;; *) SECRETS_ONLY="$1"; shift ;; esac
         fi
         ;;
-      *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit>" ;;
+      *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit|push>" ;;
     esac
   fi
 
@@ -2012,6 +2095,7 @@ main() {
     smoke-test) require_yq; cmd_smoke_test ;;
     urls)       require_yq; cmd_urls ;;
     logs)       require_yq; cmd_logs ;;
+    ssh)        require_yq; cmd_ssh ;;
     *) die "unknown command: $cmd  (try: ./scripts/stack.sh help)" ;;
   esac
 }

@@ -217,6 +217,7 @@ targets:
       volume_size_gb: 100
       volume_type: gp3
       region: ap-northeast-2
+      ssm_path_prefix: /sais/phase-1
       # key_name and allowed_cidr have no safe default — pass them explicitly:
       #   ./scripts/stack.sh up --target aws-ec2 \
       #       --tf-var key_name=my-keypair --tf-var allowed_cidr=1.2.3.4/32
