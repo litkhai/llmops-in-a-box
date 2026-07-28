@@ -255,6 +255,7 @@ render_litellm() {
       [ -n "$key" ]  && printf '      api_key: os.environ/%s\n'  "$key"
       [ -n "$rpm" ]  && printf '      rpm: %s\n' "$rpm"
       [ -n "$tpm" ]  && printf '      tpm: %s\n' "$tpm"
+      printf '      timeout: %s\n' "$(qs '.layers.gateway.options.request_timeout_s')"
       printf '    model_info:\n'
       printf '      mode: chat\n'
       [ -n "$ctx" ] && printf '      max_input_tokens: %s\n' "$ctx"
