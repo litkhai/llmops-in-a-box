@@ -272,10 +272,12 @@ layers:
         threshold: 0.15
       routing:
         strategy: simple-shuffle
-        # claude-sonnet falls back to gpt-4o so a multilingual request still
-        # succeeds if the Anthropic API is unavailable or rate-limited.
+        # gpt-4o falls back to claude-sonnet on quota/rate-limit (429).
+        # claude-sonnet falls back to gpt-4o if the Anthropic API is unavailable.
         # qwen-7b falls back to gpt-4o when the self-hosted pod is cold or down.
         fallbacks:
+          - from: gpt-4o
+            to: [claude-sonnet]
           - from: claude-sonnet
             to: [gpt-4o]
           - from: qwen-7b

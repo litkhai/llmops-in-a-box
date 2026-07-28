@@ -38,6 +38,7 @@ litellm_settings:
 router_settings:
   routing_strategy: simple-shuffle
   fallbacks:
+    - { "gpt-4o": [claude-sonnet] }
     - { "claude-sonnet": [gpt-4o] }
 
 general_settings:
