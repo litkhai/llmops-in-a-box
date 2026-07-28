@@ -175,8 +175,8 @@ load_env() {
       case "$env" in
         ''|*[!A-Z0-9_]*) continue ;;
       esac
-      # Do not overwrite a non-empty value already in the environment
-      # (e.g. AWS_PROFILE set by the caller before invoking stack.sh).
+      # Skip empty values and do not overwrite non-empty caller-supplied vars.
+      [ -n "$val" ] || continue
       eval "[ -n \"\${${env}:-}\" ]" && continue
       export "$env=$val"
     done
@@ -196,7 +196,8 @@ load_env() {
       \'*\') val="${val#\'}"; val="${val%\'}" ;;
       \"*\") val="${val#\"}"; val="${val%\"}" ;;
     esac
-    # Do not overwrite a non-empty value already in the environment.
+    # Skip empty values and do not overwrite non-empty caller-supplied vars.
+    [ -n "$val" ] || continue
     eval "[ -n \"\${${key}:-}\" ]" && continue
     export "$key=$val"
   done < "$f"
