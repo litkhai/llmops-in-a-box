@@ -42,7 +42,7 @@ x-langfuse-env: &langfuse-env
   # Optional. Blank keeps Langfuse on the OSS feature set.
   LANGFUSE_EE_LICENSE_KEY: ${LANGFUSE_EE_LICENSE_KEY:-}
   TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
-  LANGFUSE_MIGRATION_V4_WRITE_MODE: "legacy"
+  LANGFUSE_MIGRATION_V4_WRITE_MODE: "dual"
 
   CLICKHOUSE_URL: http://clickhouse:8123
   CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
@@ -234,11 +234,13 @@ services:
   #  Coupled to CLICKHOUSE_IMAGE_TAG above: v4 needs ClickHouse 25.12 or newer.
   #  Moving one without the other breaks the stack.
   #
-  #  LANGFUSE_MIGRATION_V4_WRITE_MODE is set to "legacy" below. The v4 RC
-  #  defaults to "events_only", which makes /api/public/ingestion reject SDK v2
-  #  trace-create events (LiteLLM ships Langfuse SDK v2). Valid values are
-  #  "legacy" | "dual" | "events_only". "legacy" restores the v3-compatible
-  #  ingestion path. Remove this override once LiteLLM upgrades to SDK v3.
+  #  LANGFUSE_MIGRATION_V4_WRITE_MODE is set to "dual" below. The v4 RC
+  #  defaults to "events_only", which rejects SDK v2 trace-create events from
+  #  LiteLLM. "dual" writes to both the legacy and the new v4 event path, so
+  #  SDK v2 trace-create is accepted while the worker's OTEL_BEHAVIOUR=direct
+  #  (default for fresh installs) stays compatible. Valid values are
+  #  "legacy" | "dual" | "events_only"; "legacy" crashes the worker.
+  #  Remove this override once LiteLLM upgrades to SDK v3.
   langfuse-worker:
     image: langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-4.0.0-rc.2}
     profiles: [obs]
