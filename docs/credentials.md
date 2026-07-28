@@ -127,6 +127,27 @@ one place:
 These values are listed under `secrets.optional."1"` in `stack.yaml` so
 `secrets push` picks them up automatically.
 
+## Image generation (free tier)
+
+LibreChat exposes a single image generation option (`dall-e-3`). LiteLLM routes
+requests to HuggingFace FLUX.1-schnell first and falls back to Cloudflare
+Workers AI FLUX.1-schnell automatically. Both providers offer a free tier with
+no credit card required. If both tokens are absent, image generation is silently
+disabled.
+
+| Variable | Where to get it |
+|---|---|
+| `HF_TOKEN` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) → "New token" → type **Read** → copy. Starts with `hf_`. |
+| `CF_API_TOKEN` | [dash.cloudflare.com](https://dash.cloudflare.com/) → "My Profile" → "API Tokens" → "Create Token" → use the **Cloudflare Workers AI** template → copy. |
+| `CF_ACCOUNT_ID` | Top-right of any Cloudflare dashboard page under **Account ID**. |
+
+Enter these through the setup menu (they appear under the
+"RunPod / vLLM / HuggingFace / Cloudflare" group):
+
+```bash
+./scripts/stack.sh secrets setup --phase 1
+```
+
 ## Focused and automated use
 
 ```bash

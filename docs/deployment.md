@@ -365,3 +365,27 @@ gateway configuration, not the client protocol.
     ```bash
     ./scripts/stack.sh render
     ```
+
+??? question "Image generation returns an error"
+    LiteLLM routes image generation requests to HuggingFace first. If
+    HuggingFace hits its rate limit, LiteLLM automatically retries on
+    Cloudflare Workers AI. No action is required for a transient rate limit —
+    the fallback is transparent to LibreChat.
+
+    If both providers fail, verify that `HF_TOKEN`, `CF_API_TOKEN`, and
+    `CF_ACCOUNT_ID` are present in the running container:
+
+    ```bash
+    docker compose exec litellm env | grep -E 'HF_|CF_'
+    ```
+
+    If any variable is missing, set it with
+    `./scripts/stack.sh secrets setup --phase 1`, then restart LiteLLM:
+
+    ```bash
+    ./scripts/stack.sh secrets write
+    docker compose up -d --no-deps litellm
+    ```
+
+    See [Credentials — Image generation (free tier)](credentials.md#image-generation-free-tier)
+    for token acquisition steps.
