@@ -36,6 +36,8 @@ names, and deployment targets.
 | AWS EC2 target | Declared, Terraform not implemented |
 | Phases 2–5 | Not built yet |
 
+If Langfuse traces are missing, a `LANGFUSE_MIGRATION_V4_WRITE_MODE` incompatibility in Langfuse v4 RC builds may be the cause — see [Deployment troubleshooting](https://litkhai.github.io/llmops-in-a-box/deployment/#troubleshooting) for details.
+
 Phase 1 sends model requests to an external provider. It demonstrates the
 gateway and observability architecture; it is not an air-gapped deployment.
 

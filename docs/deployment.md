@@ -311,3 +311,47 @@ gateway configuration, not the client protocol.
 ??? question "The Kubernetes target refuses to start"
     Expected in the current repository. That target is a declaration of the
     intended interface, not a completed deployment artifact.
+
+??? question "Langfuse shows no traces — \"Event type not accepted\" in the ingestion response"
+    Langfuse v4.0.0-rc.2 defaults `LANGFUSE_MIGRATION_V4_WRITE_MODE` to
+    `events_only`, which rejects the SDK v2 `trace-create` events that LiteLLM
+    sends. The fix is applied in `docker/docker-compose.yml`:
+    `LANGFUSE_MIGRATION_V4_WRITE_MODE: "disabled"`.
+
+    Verify the ingestion endpoint accepts trace events:
+
+    ```bash
+    curl -s -X POST https://langfuse.clickhouse.kr/api/public/ingestion \
+      -H "Content-Type: application/json" \
+      -u "${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}" \
+      -d '{"batch":[{"id":"test-1","type":"trace-create","body":{"id":"test-trace","name":"test"}}]}'
+    ```
+
+    A healthy response is `{"successes":[...],"errors":[]}`. If the error
+    recurs, confirm the env var is set in the running container:
+
+    ```bash
+    docker compose exec langfuse-web env | grep MIGRATION
+    ```
+
+    Remove the override once LiteLLM upgrades its bundled Langfuse SDK from
+    v2 to v3, which uses the new v4 ingestion path.
+
+??? question "`No fallback model group found for original model_group=auto`"
+    The language-routing callback rewrites `auto` to `gpt-4o` (English) or
+    `claude-sonnet` (Korean/multilingual) before the request is dispatched.
+    When that model then fails, LiteLLM looks up the fallback for the
+    **original** model group (`auto`), not the rewritten one. Without an
+    entry for `auto` in the fallback list, no recovery occurs.
+
+    The fix is in `stack.yaml`: `auto` is listed under
+    `layers.gateway.options.routing.fallbacks` with `claude-sonnet` as its
+    target, and `scripts/stack.sh` includes `auto` when rendering the
+    LiteLLM fallback table.
+
+    If you see this error after editing `stack.yaml`, verify that `auto`
+    appears in the `fallbacks` list, then re-render:
+
+    ```bash
+    ./scripts/stack.sh render
+    ```
