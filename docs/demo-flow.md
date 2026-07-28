@@ -32,9 +32,7 @@ Lead with the architecture, not the UI.
 
 **Talking points**
 
-- One `stack.yaml` describes the whole stack. Docker runs today; the EC2 target
-  is declared behind the same interface but its Terraform artifact is not yet
-  implemented.
+- One `stack.yaml` describes the whole stack. The `docker` and `aws-ec2` targets are both runnable today behind the same interface.
 - **Layers are fixed; implementations are swappable.** vLLM → SGLang, RunPod → on-prem GPU, LibreChat → your own app.
 - The build-out is phased on purpose: Phase 1 proves the architecture with no GPU, so every later layer plugs into a tracing pipeline that already works.
 
@@ -43,26 +41,51 @@ Lead with the architecture, not the UI.
 ```
 
 - Models are declared once and rendered into both the gateway routing table and the UI picker. No drift between what the UI offers and what the gateway can serve.
+- The UI shows one model: `auto`. Two chat providers and two image providers are wired in behind it — the user never sees a model switch.
 
 ---
 
-## 2. Traffic — same client, different providers *(3 min)*
+## 2. Traffic — routing and modalities *(4 min)*
 
-In LibreChat, send the same prompt to both models from the picker. Then show the client code:
+### Chat: language routing via `auto`
+
+LibreChat's model picker shows a single model: `auto`. Send the same prompt in
+English and Korean — the gateway routes each to a different provider without any
+client change:
 
 ```python
-for m in ["gpt-4o", "claude-sonnet"]:
-    client.chat.completions.create(model=m, messages=[...])
+for lang, msg in [
+    ("English", "Explain ClickHouse in one sentence."),
+    ("Korean",  "ClickHouse를 한 문장으로 설명해줘."),
+]:
+    client.chat.completions.create(
+        model="auto",
+        messages=[{"role": "user", "content": msg}],
+    )
 ```
 
 **Talking points**
 
-- One endpoint, one SDK, one auth token. Anthropic's different wire format is handled by the gateway.
+- One endpoint, one SDK, one model alias. The gateway detects script and routes: Latin → GPT-4o, non-Latin → Claude Sonnet.
 - Applications do not change when models do. That is the migration story in one line.
+- Fallback is automatic: if one provider is unavailable, LiteLLM retries on the other. The client always gets a response.
+
+### Image generation: HuggingFace → Cloudflare fallback
+
+Open the **DALL-E UI** in LibreChat (the image icon — no model switch needed)
+and generate an image. The gateway routes the request to HuggingFace
+FLUX.1-schnell with a Cloudflare Workers AI fallback.
+
+**Talking points**
+
+- The chat model picker never changes — `auto` is the only choice. Modality switching is handled by the UI and gateway together.
+- Both providers are free tier. No credit card, no GPU. The same fallback pattern scales to paid providers.
 
 Include in the run:
 
-- **one long generation** — so latency and token counts are visibly different between models
+- **one long chat generation** — so latency and token counts are visibly different between providers
+- **one Korean prompt** — to show language routing in action
+- **one image prompt** — to show the second routing path
 - **one deliberate failure** — an invalid model alias, or a revoked key, so an error trace appears
 
 ---
@@ -73,8 +96,10 @@ Open Langfuse. Spend the most time here.
 
 | Show | Say |
 |---|---|
-| **Traces** list | Every request, both providers, one pane. Nothing was instrumented in the application. |
-| A single trace | Full prompt and completion, latency, token counts, **computed cost**. |
+| **Traces** list | Every request — chat and image, both providers — in one pane. Nothing was instrumented in the application. |
+| A chat trace | Full prompt and completion, latency, token counts, **computed cost**. |
+| An image trace | Same trace format; `model` shows `dall-e-3` or `dall-e-3-cf` (Cloudflare fallback), making the routing decision visible. |
+| The language routing trace | `model` shows `gpt-4o` or `claude-sonnet` — the gateway's routing decision is captured, not just the response. |
 | Model comparison | Cost and latency side by side — this is what makes self-hosted vs. API economics decidable rather than theoretical. |
 | The error trace | Failures are traced too. Most observability setups only capture successes; you find out about failures from users. |
 | **Sessions** | Multi-turn conversations grouped, not scattered across unrelated traces. |

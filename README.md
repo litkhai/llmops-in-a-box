@@ -79,19 +79,28 @@ The shape the stack is built toward, with the phase that delivers each path:
 ```text
 LibreChat / applications
         │
-        ▼
-LiteLLM Gateway ─────────── traces ──────────▶ Langfuse
+        ├─ chat (model: auto)
+        │
+        └─ image (DALL-E UI)
+               │
+               ▼
+LiteLLM Gateway ──────────── traces ─────────▶ Langfuse
         │                                          │
-        ├─▶ OpenAI · Anthropic          phase 1     ClickHouse · Postgres
-        ├─▶ MCP tools                   phase 2        Redis · MinIO
+        ├─ auto · English  ──▶ gpt-4o    p.1    ClickHouse · Postgres
+        ├─ auto · Korean   ──▶ claude-sonnet       Redis · MinIO
+        ├─ dall-e-3        ──▶ HuggingFace FLUX.1-schnell
+        │   fallback       ──▶ Cloudflare FLUX.1-schnell
+        ├─▶ MCP tools                   phase 2
         └─▶ vLLM on RunPod              phase 3
                  │
                  └─▶ MinIO AIStor       phase 4
                      datasets · artifacts · weights · KV cache
 ```
 
-Phase 1 — the OpenAI and Anthropic path plus the whole Langfuse column — is what
-runs today.
+Phase 1 runs today. One model alias (`auto`) in the chat UI routes to the right
+provider based on language script. Image generation is a separate path —
+LibreChat's DALL-E UI sends requests through the same LiteLLM gateway with a
+HuggingFace primary and Cloudflare fallback. All paths emit traces to Langfuse.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model
 alias and sends success and failure telemetry to Langfuse. The model catalog is

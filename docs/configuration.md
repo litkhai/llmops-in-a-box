@@ -209,9 +209,40 @@ Add one entry to `models:` in `stack.yaml`, then re-render. The gateway and the 
 
 ---
 
+## Routing overview
+
+Phase 1 has two routing paths. Both go through LiteLLM and produce Langfuse
+traces.
+
+```mermaid
+flowchart TD
+    LC["LibreChat"]
+    G["LiteLLM Gateway"]
+    LF["Langfuse"]
+    GPT["gpt-4o\n(OpenAI)"]
+    CS["claude-sonnet\n(Anthropic)"]
+    HF["HuggingFace\nFLUX.1-schnell"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell"]
+
+    LC -- "chat · model=auto" --> G
+    LC -- "DALL-E UI · model=dall-e-3" --> G
+
+    G -- "English (Latin script)" --> GPT
+    G -- "Korean / non-Latin" --> CS
+    G -- "primary" --> HF
+    G -- "fallback" --> CF
+
+    G -- "success + failure traces" --> LF
+```
+
+The chat path and the image path share the same gateway endpoint and the same
+Langfuse project. No client-side changes are needed to switch providers.
+
+---
+
 ## Language routing
 
-LiteLLM routes requests automatically by the dominant script of the last user message — no client changes required.
+LiteLLM routes chat requests automatically by the dominant script of the last user message — no client changes required.
 
 | Detected script | Target model |
 |---|---|
@@ -220,7 +251,7 @@ LiteLLM routes requests automatically by the dominant script of the last user me
 
 Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
 
-The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched.
+The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Image generation requests (`call_type != "completion"`) bypass the callback entirely — `dall-e-3` is never rewritten.
 
 **Fallback:** `claude-sonnet → gpt-4o` and `gpt-4o → claude-sonnet`. If one provider is unavailable, LiteLLM retries on the other. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
 
@@ -253,10 +284,26 @@ To disable routing and send all requests to a single model, set `language_routin
 
 ## Image generation
 
-LibreChat exposes a single image model named `dall-e-3`. LiteLLM maps it to
-HuggingFace FLUX.1-schnell and falls back automatically to Cloudflare Workers
-AI FLUX.1-schnell when the primary provider fails. Both providers have a free
-tier.
+LibreChat has a dedicated DALL-E image generation UI — separate from the chat
+model picker, which shows only `auto`. When the user opens the DALL-E interface,
+LibreChat sends a request to LiteLLM's `/v1/images/generations` endpoint with
+`model: dall-e-3`. LiteLLM maps it to HuggingFace FLUX.1-schnell and falls
+back to Cloudflare Workers AI automatically. The success/failure callback sends
+a trace to Langfuse regardless of which provider served the request.
+
+```mermaid
+flowchart LR
+    UI["LibreChat\nDALL-E UI"]
+    G["LiteLLM Gateway\n/v1/images/generations"]
+    HF["HuggingFace\nFLUX.1-schnell\n(primary)"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(fallback)"]
+    LF["Langfuse trace"]
+
+    UI -- "model: dall-e-3" --> G
+    G -- "success" --> HF
+    HF -. "rate limit / error" .-> CF
+    G -- "trace" --> LF
+```
 
 Image generation is enabled by default when the credentials are present.
 The relevant `stack.yaml` block:
