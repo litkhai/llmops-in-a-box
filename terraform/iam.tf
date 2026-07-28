@@ -29,7 +29,10 @@ resource "aws_iam_role_policy" "ssm_read" {
         "ssm:GetParameter",
         "ssm:GetParametersByPath"
       ]
-      Resource = "arn:aws:ssm:${var.region}:*:parameter${var.ssm_path_prefix}/*"
+      Resource = [
+        "arn:aws:ssm:${var.region}:*:parameter${var.ssm_path_prefix}",
+        "arn:aws:ssm:${var.region}:*:parameter${var.ssm_path_prefix}/*"
+      ]
     }]
   })
 }

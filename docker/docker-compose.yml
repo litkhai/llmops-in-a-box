@@ -139,7 +139,7 @@ services:
       # protocol on 9000 is used by Langfuse migrations over the compose
       # network and never from the host, so publishing it would only collide
       # with something (MinIO's own default is also 9000).
-      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "0.0.0.0:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
@@ -157,7 +157,7 @@ services:
       # container, and busybox wget resolves localhost to [::1] first — the
       # healthcheck then reports "connection refused" against a server that is
       # up and answering perfectly well on IPv4.
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://0.0.0.0:8123/ping || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -198,8 +198,8 @@ services:
     ports:
       # 9002 on the host, not 9000 — ClickHouse's native port already has that,
       # and stack.yaml declares this pair as { api: 9002, console: 9001 }.
-      - "127.0.0.1:${MINIO_API_PORT:-9002}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "0.0.0.0:${MINIO_API_PORT:-9002}:9000"
+      - "0.0.0.0:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -269,7 +269,7 @@ services:
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
     ports:
-      - "127.0.0.1:${LANGFUSE_PORT:-3000}:3000"
+      - "0.0.0.0:${LANGFUSE_PORT:-3000}:3000"
     healthcheck:
       # Not 127.0.0.1, and not localhost. Langfuse binds only its container
       # IP — verified: netstat inside shows 172.x.x.x:3000 and every loopback
@@ -335,9 +335,9 @@ services:
       # Latin/English requests to gpt-4o. Referenced in litellm_config.yaml.
       - ./litellm_callbacks.py:/app/callbacks.py:ro
     ports:
-      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+      - "0.0.0.0:${LITELLM_PORT:-4000}:4000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status==200 else 1)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://0.0.0.0:4000/health/liveliness').status==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -400,9 +400,9 @@ services:
       # gateway config, so the picker cannot drift from what LiteLLM serves.
       - ./librechat.yaml:/app/librechat.yaml:ro
     ports:
-      - "127.0.0.1:${LIBRECHAT_PORT:-3080}:3080"
+      - "0.0.0.0:${LIBRECHAT_PORT:-3080}:3080"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3080/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://0.0.0.0:3080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30

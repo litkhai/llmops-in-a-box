@@ -175,6 +175,9 @@ load_env() {
       case "$env" in
         ''|*[!A-Z0-9_]*) continue ;;
       esac
+      # Do not overwrite a non-empty value already in the environment
+      # (e.g. AWS_PROFILE set by the caller before invoking stack.sh).
+      eval "[ -n \"\${${env}:-}\" ]" && continue
       export "$env=$val"
     done
     return 0
@@ -193,6 +196,8 @@ load_env() {
       \'*\') val="${val#\'}"; val="${val%\'}" ;;
       \"*\") val="${val#\"}"; val="${val%\"}" ;;
     esac
+    # Do not overwrite a non-empty value already in the environment.
+    eval "[ -n \"\${${key}:-}\" ]" && continue
     export "$key=$val"
   done < "$f"
 }
@@ -1707,10 +1712,11 @@ cmd_secrets_push() {
       say "  [dry-run] aws ssm put-parameter --name $path --type SecureString"
     else
       aws ssm put-parameter \
-        --region "$region" \
-        --name   "$path" \
-        --value  "$val" \
-        --type   SecureString \
+        --region  "$region" \
+        ${AWS_PROFILE:+--profile "$AWS_PROFILE"} \
+        --name    "$path" \
+        --value   "$val" \
+        --type    SecureString \
         --overwrite \
         --no-cli-pager >/dev/null
       ok "$(printf '%-34s' "$s") → $path"
@@ -1830,7 +1836,7 @@ cmd_up() {
         tfargs+=("-var=$k")
       done < <(printf '%s' "$TF_VARS")
       run terraform -chdir="$d" init -input=false
-      run terraform -chdir="$d" apply -input=false ${tfargs[@]+"${tfargs[@]}"}
+      run terraform -chdir="$d" apply -input=false -auto-approve ${tfargs[@]+"${tfargs[@]}"}
       # After apply, the EC2 bootstrap script installs Docker and starts the
       # stack. Poll LiteLLM until it responds or the timeout expires.
       if [ "$DRY_RUN" -eq 0 ]; then

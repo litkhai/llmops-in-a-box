@@ -561,6 +561,7 @@ secrets:
   file: .env
   required:
     - LITELLM_MASTER_KEY
+    - LITELLM_SALT_KEY
   # Missing optional secrets produce a warning and disable the models/layers
   # that need them, rather than failing the deploy.
   #
