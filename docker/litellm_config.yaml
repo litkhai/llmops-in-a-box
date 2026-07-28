@@ -35,7 +35,7 @@ litellm_settings:
   failure_callback: [langfuse]
   drop_params: true
   num_retries: 0
-  request_timeout: 30
+  request_timeout: 5
   max_budget: 50
   budget_duration: 30d
   custom_callbacks: [/app/callbacks.py]
