@@ -251,8 +251,8 @@ layers:
     requires: []
     options:
       master_key_env: LITELLM_MASTER_KEY
-      num_retries: 2
-      request_timeout_s: 600
+      num_retries: 0        # retry on the same model before fallback — 0 means go straight to fallback
+      request_timeout_s: 30 # per-request timeout; fallback triggers immediately on 429/5xx
       drop_params: true         # tolerate params a given provider doesn't accept
       callbacks:
         success: [langfuse]
