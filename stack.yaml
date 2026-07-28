@@ -294,6 +294,19 @@ layers:
             to: [gpt-4o]
           - from: auto
             to: [claude-sonnet]
+      image_generation:
+        enabled: true
+        # LibreChat requests this model name for image generation.
+        # LiteLLM maps it to HuggingFace FLUX; Cloudflare is the fallback.
+        dalle_alias: dall-e-3
+        providers:
+          huggingface:
+            model: black-forest-labs/FLUX.1-schnell
+            api_key_env: HF_TOKEN
+          cloudflare:
+            model: "@cf/black-forest-labs/flux-1-schnell"
+            api_key_env: CF_API_TOKEN
+            account_id_env: CF_ACCOUNT_ID
       budget:
         max_budget_usd: 50
         duration: 30d
@@ -622,6 +635,13 @@ secrets:
       - LANGFUSE_EMAIL_USER
       - LANGFUSE_EMAIL_PASSWORD
       - LANGFUSE_EMAIL_FROM
+      # Image generation — free-tier providers.
+      # HF: https://huggingface.co/settings/tokens (read token, starts with hf_)
+      # CF:  https://dash.cloudflare.com/ → API Tokens → "Cloudflare Workers AI" template
+      #      CF_ACCOUNT_ID: top-right of the Cloudflare dashboard
+      - HF_TOKEN
+      - CF_API_TOKEN
+      - CF_ACCOUNT_ID
       # Domain / HTTPS proxy — aws-ec2 target only.
       # Set interactively: ./scripts/stack.sh secrets domain
       - DOMAIN_BASE
