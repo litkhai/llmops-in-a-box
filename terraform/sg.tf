@@ -1,6 +1,6 @@
 resource "aws_security_group" "stack" {
   name        = "${var.project_slug}-stack"
-  description = "LLMOps in a Box — inbound from operator CIDR only"
+  description = "LLMOps in a Box - inbound from operator CIDR only"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -33,6 +33,22 @@ resource "aws_security_group" "stack" {
     protocol    = "tcp"
     cidr_blocks = [var.allowed_cidr]
     description = "LiteLLM"
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP (redirects to HTTPS via Caddy)"
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS (Caddy with Let's Encrypt)"
   }
 
   egress {

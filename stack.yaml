@@ -221,6 +221,16 @@ targets:
       # key_name and allowed_cidr have no safe default — pass them explicitly:
       #   ./scripts/stack.sh up --target aws-ec2 \
       #       --tf-var key_name=my-keypair --tf-var allowed_cidr=1.2.3.4/32
+    # Optional: configure a custom domain for automatic HTTPS via Caddy.
+    # Values here are overridden by DOMAIN_BASE / DOMAIN_SSL_EMAIL env vars.
+    # Run `./scripts/stack.sh secrets domain` to set them interactively.
+    domain:
+      base: ""             # e.g. example.com  (overridden by DOMAIN_BASE)
+      ssl_email: ""        # Let's Encrypt contact (overridden by DOMAIN_SSL_EMAIL)
+      subdomains:
+        litellm: litellm   # litellm.example.com
+        langfuse: langfuse # langfuse.example.com
+        librechat: chat    # chat.example.com
 
   k8s:
     kind: helm
@@ -603,6 +613,10 @@ secrets:
       - LIBRECHAT_CREDS_IV
       - LIBRECHAT_JWT_SECRET
       - LIBRECHAT_JWT_REFRESH_SECRET
+      # Domain / HTTPS proxy — aws-ec2 target only.
+      # Set interactively: ./scripts/stack.sh secrets domain
+      - DOMAIN_BASE
+      - DOMAIN_SSL_EMAIL
     2:
       - MCP_CLICKHOUSE_URL
       - CLICKHOUSE_CLOUD_HOST
@@ -625,6 +639,7 @@ render:
   files:
     litellm: docker/litellm_config.yaml
     librechat: docker/librechat.yaml
+    caddy: docker/caddy/Caddyfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Health checks — {{host}} is substituted from the resolved target.

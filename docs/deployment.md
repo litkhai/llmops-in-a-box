@@ -76,6 +76,10 @@ the service or recreate disposable volumes.
 A single EC2 instance running the same Docker Compose stack as the local
 target. Region: `ap-northeast-2`. Instance: `t3.xlarge`, 100 GiB gp3.
 
+Services are accessible via direct port (3000, 3080, 4000) or, when a domain
+is configured, via HTTPS subdomains (`chat.<domain>`, `langfuse.<domain>`,
+`litellm.<domain>`).
+
 ### Prerequisites
 
 | Requirement | Check |
@@ -107,26 +111,59 @@ aws ssm get-parameters-by-path \
   --query 'Parameters[*].Name'
 ```
 
-### 2. Provision and bootstrap
+### 2. (Optional) Configure a custom domain
+
+Skip this step for plain HTTP access via direct ports.
+
+**a. Add DNS records.** In your DNS provider, create `A` records pointing each
+subdomain at the EC2 instance's public IP:
+
+| Subdomain | Points to |
+|---|---|
+| `chat.<your-domain>` | EC2 public IP |
+| `langfuse.<your-domain>` | EC2 public IP |
+| `litellm.<your-domain>` | EC2 public IP |
+
+**b. Set domain config interactively:**
+
+```bash
+./scripts/stack.sh secrets domain
+```
+
+This prompts for `DOMAIN_BASE` (e.g. `example.com`) and `DOMAIN_SSL_EMAIL`
+(Let's Encrypt contact) and writes them to `.env`.
+
+**c. Push the domain config to SSM:**
+
+```bash
+./scripts/stack.sh secrets push --target aws-ec2
+```
+
+The bootstrap script reads `DOMAIN_BASE` from SSM at first boot. If set, it
+renders a `Caddyfile` and starts the Caddy reverse proxy automatically.
+Caddy obtains a TLS certificate from Let's Encrypt without any manual steps.
+
+**Certificate lifecycle:** Let's Encrypt certificates are valid for 90 days.
+Caddy renews them automatically (typically at 30 days remaining). As long as
+the instance is running and reachable on port 80/443, certificates stay current
+indefinitely.
+
+### 3. Provision and bootstrap
 
 ```bash
 ./scripts/stack.sh up --target aws-ec2 \
-    --tf-var key_name=<your-key-pair-name> \
-    --tf-var allowed_cidr=<your-ip>/32
+    --tf-var key_name=<your-key-pair-name>
 ```
 
 This runs `terraform apply`, then waits up to 5 minutes for the bootstrap
-script to complete. The bootstrap script installs Docker, clones this
-repository, pulls credentials from SSM, and starts the Phase 1 compose stack.
+script to complete. The bootstrap script:
+1. Installs Docker, yq
+2. Clones this repository
+3. Pulls all credentials (including `DOMAIN_BASE`) from SSM
+4. Starts the Phase 1 compose stack
+5. If `DOMAIN_BASE` is set: renders `Caddyfile` and starts the Caddy proxy
 
-Get your public IP: `curl -s https://checkip.amazonaws.com`
-
-!!! warning "Never use `0.0.0.0/0` for `allowed_cidr`"
-    The stack holds live provider API keys. An open security group is a
-    billing and data-exposure risk. Terraform's variable validation will
-    reject `0.0.0.0/0` outright.
-
-### 3. Verify
+### 4. Verify
 
 ```bash
 ./scripts/stack.sh status --target aws-ec2
@@ -141,7 +178,7 @@ If bootstrap is still running, inspect the log:
 sudo tail -f /var/log/bootstrap-ec2.log
 ```
 
-### 4. Tear down
+### 5. Tear down
 
 ```bash
 ./scripts/stack.sh down --target aws-ec2
@@ -170,6 +207,40 @@ credential:
 2. Either recreate the affected service volume, or run `down --purge` and
    reprovision from scratch.
 
+### Enabling HTTPS on a running instance
+
+If the instance is already running and you want to add HTTPS:
+
+```bash
+# 1. Set domain config in .env
+./scripts/stack.sh secrets domain
+
+# 2. Push to SSM
+./scripts/stack.sh secrets push --target aws-ec2
+
+# 3. SSH into the instance
+./scripts/stack.sh ssh --target aws-ec2
+
+# On the instance:
+cd /opt/llmops-in-a-box
+
+# Pull updated SSM parameters into .env
+./scripts/stack.sh secrets pull  # or re-run the SSM fetch manually
+
+# Render Caddyfile
+./scripts/stack.sh render --target aws-ec2 --profile phase-1
+
+# Start the proxy
+docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d
+```
+
+Or, with `DOMAIN_BASE` already in `/opt/llmops-in-a-box/.env` on the instance:
+
+```bash
+./scripts/stack.sh render --target aws-ec2 --profile phase-1
+docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d
+```
+
 ### Approximate cost
 
 | Resource | On-demand, ap-northeast-2 |
@@ -180,6 +251,17 @@ credential:
 
 Stop or terminate the instance when not in use. This is a demo stack, not a
 production service.
+
+### Published ports (EC2)
+
+| Service | Direct port | HTTPS subdomain (if domain configured) |
+|---|---|---|
+| LibreChat | `3080` | `chat.<domain>` |
+| Langfuse | `3000` | `langfuse.<domain>` |
+| LiteLLM | `4000` | `litellm.<domain>` |
+
+Ports 80 and 443 are open to `0.0.0.0/0` for HTTPS. The remaining ports use
+`allowed_cidr` (default `0.0.0.0/0`; each service has its own authentication).
 
 ## External vLLM serving
 

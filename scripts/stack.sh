@@ -388,11 +388,47 @@ render_librechat() {
   ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")"
 }
 
+render_caddy() {
+  # Generates docker/caddy/Caddyfile for the aws-ec2 target.
+  # Silently skips if no domain is configured (DOMAIN_BASE env var or stack.yaml).
+  local out base email sub_litellm sub_langfuse sub_librechat
+  base="${DOMAIN_BASE:-$(qs ".targets.\"aws-ec2\".domain.base" 2>/dev/null || true)}"
+  [ -n "$base" ] || return 0
+
+  email="${DOMAIN_SSL_EMAIL:-$(qs ".targets.\"aws-ec2\".domain.ssl_email" 2>/dev/null || true)}"
+  sub_litellm="$(qs ".targets.\"aws-ec2\".domain.subdomains.litellm")"
+  sub_langfuse="$(qs ".targets.\"aws-ec2\".domain.subdomains.langfuse")"
+  sub_librechat="$(qs ".targets.\"aws-ec2\".domain.subdomains.librechat")"
+  [ -n "$sub_litellm" ]  || sub_litellm="litellm"
+  [ -n "$sub_langfuse" ] || sub_langfuse="langfuse"
+  [ -n "$sub_librechat" ] || sub_librechat="chat"
+
+  out="$REPO_ROOT/$(qs '.render.files.caddy')"
+  mkdir -p "$(dirname "$out")"
+
+  {
+    printf '# %s\n' "$(qs '.render.banner')"
+    printf '# target: aws-ec2  domain: %s\n\n' "$base"
+    if [ -n "$email" ]; then
+      printf '{\n    email %s\n}\n\n' "$email"
+    fi
+    printf '%s.%s {\n    reverse_proxy librechat:3080\n    encode gzip\n}\n\n' \
+      "$sub_librechat" "$base"
+    printf '%s.%s {\n    reverse_proxy langfuse-web:3000\n    encode gzip\n}\n\n' \
+      "$sub_langfuse" "$base"
+    printf '%s.%s {\n    reverse_proxy litellm:4000\n    encode gzip\n}\n\n' \
+      "$sub_litellm" "$base"
+  } > "$out"
+
+  ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")  (${sub_librechat}.${base}, ${sub_langfuse}.${base}, ${sub_litellm}.${base})"
+}
+
 cmd_render() {
   resolve_defaults; load_env
   info "Rendering configs  ${C_DIM}profile=$PROFILE${C_RST}"
   render_litellm
   render_librechat
+  [ "$TARGET" = "aws-ec2" ] && render_caddy || true
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -710,6 +746,15 @@ validate_credential_value() {
       case "$val" in lf_sk_?*|sk-lf-?*) [ "${#val}" -ge 12 ] \
         || { VALIDATION_MESSAGE="expected a Langfuse secret key"; return 1; } ;;
         *) VALIDATION_MESSAGE="expected prefix lf_sk_"; return 1 ;; esac ;;
+    DOMAIN_BASE)
+      case "$val" in
+        *://*|*[[:space:]]*|*/) VALIDATION_MESSAGE="expected a bare domain name such as example.com"; return 1 ;;
+      esac ;;
+    DOMAIN_SSL_EMAIL)
+      case "$val" in
+        ?*@?*.?*) : ;;
+        *) VALIDATION_MESSAGE="expected an email address"; return 1 ;;
+      esac ;;
     VLLM_API_BASE)
       case "$val" in http://*/v1|https://*/v1) : ;; *) VALIDATION_MESSAGE="expected an http(s) URL ending in /v1"; return 1 ;; esac ;;
     MCP_CLICKHOUSE_URL)
@@ -889,6 +934,8 @@ classify_credential_technology() {
       CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM / Hugging Face" ;;
     AWS_*)
       CREDENTIAL_GROUP_ID="aws"; CREDENTIAL_GROUP_NAME="AWS authentication / EC2" ;;
+    DOMAIN_*)
+      CREDENTIAL_GROUP_ID="domain"; CREDENTIAL_GROUP_NAME="Domain / HTTPS proxy" ;;
     ARTIFACT_MINIO_*)
       CREDENTIAL_GROUP_ID="artifact-minio"; CREDENTIAL_GROUP_NAME="Artifact MinIO" ;;
     *)
@@ -1066,6 +1113,89 @@ set_default_credentials() {
   setup_dirty=1
   ok "$changed default credential fields updated; values were not printed"
   warn "Choose [w] to refresh .env before starting the stack."
+}
+
+set_dotenv_value() {
+  local env_file="$1" key="$2" val="$3" line tmp
+  if [ -f "$env_file" ] && grep -q "^${key}=" "$env_file"; then
+    tmp="$(mktemp "${env_file}.XXXXXX")"
+    chmod 600 "$tmp"
+    while IFS= read -r line; do
+      case "$line" in
+        "${key}="*) printf '%s=%s\n' "$key" "$val" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$env_file" > "$tmp"
+    mv "$tmp" "$env_file"
+    chmod 600 "$env_file"
+  else
+    printf '%s=%s\n' "$key" "$val" >> "$env_file"
+    chmod 600 "$env_file"
+  fi
+}
+
+cmd_secrets_domain() {
+  local base email env_file cur_base cur_email changed=0
+  env_file="$REPO_ROOT/$(qs '.secrets.file')"
+  load_env
+
+  cur_base="${DOMAIN_BASE:-}"
+  cur_email="${DOMAIN_SSL_EMAIL:-}"
+
+  info "Domain configuration  ${C_DIM}(aws-ec2 target — automatic HTTPS via Caddy)${C_RST}"
+  say ""
+  say "  Configure the base domain and Let's Encrypt contact email."
+  say "  DNS A records must point to the EC2 instance before provisioning."
+  say "  Leave a field blank to keep the current value."
+  say ""
+
+  if [ -n "$cur_base" ]; then
+    printf '  DOMAIN_BASE [%s]: ' "$cur_base" >&2
+  else
+    printf '  DOMAIN_BASE (e.g. example.com): ' >&2
+  fi
+  IFS= read -r base
+  [ -n "$base" ] || base="$cur_base"
+  # strip protocol prefix if accidentally included
+  base="${base#http://}"; base="${base#https://}"; base="${base%/}"
+
+  if [ -n "$cur_email" ]; then
+    printf '  DOMAIN_SSL_EMAIL [%s]: ' "$cur_email" >&2
+  else
+    printf '  DOMAIN_SSL_EMAIL (Let'\''s Encrypt contact): ' >&2
+  fi
+  IFS= read -r email
+  [ -n "$email" ] || email="$cur_email"
+
+  if [ -z "$base" ] && [ -z "$email" ]; then
+    ok "no domain values provided — nothing changed"
+    return 0
+  fi
+
+  [ -f "$env_file" ] || die "$env_file not found — run './scripts/stack.sh secrets init' first"
+
+  if [ -n "$base" ]; then
+    if ! validate_credential_value "DOMAIN_BASE" "$base"; then
+      die "DOMAIN_BASE rejected: $VALIDATION_MESSAGE"
+    fi
+    set_dotenv_value "$env_file" "DOMAIN_BASE" "$base"
+    ok "DOMAIN_BASE=$base written to $env_file"
+    changed=$((changed + 1))
+  fi
+  if [ -n "$email" ]; then
+    if ! validate_credential_value "DOMAIN_SSL_EMAIL" "$email"; then
+      die "DOMAIN_SSL_EMAIL rejected: $VALIDATION_MESSAGE"
+    fi
+    set_dotenv_value "$env_file" "DOMAIN_SSL_EMAIL" "$email"
+    ok "DOMAIN_SSL_EMAIL=$email written to $env_file"
+    changed=$((changed + 1))
+  fi
+
+  say ""
+  say "  ${C_DIM}Next steps:${C_RST}"
+  say "  ${C_DIM}  1. Push to SSM:  ./scripts/stack.sh secrets push --target aws-ec2${C_RST}"
+  say "  ${C_DIM}  2. Render Caddy: ./scripts/stack.sh render --target aws-ec2${C_RST}"
+  say "  ${C_DIM}  3. Start proxy:  docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d${C_RST}"
 }
 
 cmd_secrets_set() {
@@ -1734,6 +1864,7 @@ cmd_secrets() {
   case "${SECRETS_SUB:-}" in
     init)              cmd_secrets_init ;;
     setup)             cmd_secrets_setup ;;
+    domain)            cmd_secrets_domain ;;
     set)               cmd_secrets_set ;;
     generate|gen)      cmd_secrets_generate ;;
     status)            cmd_secrets_status ;;
@@ -1741,7 +1872,7 @@ cmd_secrets() {
     write)             cmd_secrets_write ;;
     audit)             cmd_secrets_audit ;;
     push)              cmd_secrets_push ;;
-    *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit|push>" ;;
+    *) die "usage: ./scripts/stack.sh secrets <init|setup|domain|set|generate|status|validate|write|audit|push>" ;;
   esac
 }
 
@@ -2028,6 +2159,7 @@ ${C_B}COMMANDS${C_RST}
   doctor      Preflight: tooling, secrets, layers, models
   secrets init       Create or synchronize the private inventory (mode 600)
   secrets setup      Configure all stack technologies from one menu
+  secrets domain     Set DOMAIN_BASE and DOMAIN_SSL_EMAIL for HTTPS proxy (aws-ec2)
   secrets set NAME   Set one credential with hidden input and format validation
   secrets generate   Generate and store local credentials without printing them
   secrets status     Show set / missing / invalid state without showing values
@@ -2080,13 +2212,13 @@ main() {
   # `secrets` takes a bare subcommand before any flags.
   if [ "$cmd" = "secrets" ]; then
     case "${1:-}" in
-      init|setup|set|generate|gen|status|validate|write|audit|push)
+      init|setup|domain|set|generate|gen|status|validate|write|audit|push)
         SECRETS_SUB="$1"; shift
         if [ "$SECRETS_SUB" = "set" ] && [ $# -gt 0 ]; then
           case "$1" in -*) : ;; *) SECRETS_ONLY="$1"; shift ;; esac
         fi
         ;;
-      *) die "usage: ./scripts/stack.sh secrets <init|setup|set|generate|status|validate|write|audit|push>" ;;
+      *) die "usage: ./scripts/stack.sh secrets <init|setup|domain|set|generate|status|validate|write|audit|push>" ;;
     esac
   fi
 

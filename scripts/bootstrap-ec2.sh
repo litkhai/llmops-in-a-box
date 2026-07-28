@@ -130,17 +130,40 @@ cd "$REPO_DIR"
 sudo -u ec2-user bash -lc \
   'cd /opt/llmops-in-a-box && ./scripts/stack.sh up --target docker --profile phase-1'
 
+# ── 6. Start Caddy proxy if domain is configured ──────────────────────────────
+DOMAIN_BASE_VAL=""
+if [ -f "$ENV_FILE" ]; then
+  DOMAIN_BASE_VAL="$(grep '^DOMAIN_BASE=' "$ENV_FILE" | cut -d= -f2 | tr -d '\r' || true)"
+fi
+
+if [ -n "$DOMAIN_BASE_VAL" ]; then
+  echo "==> Configuring Caddy HTTPS proxy for $DOMAIN_BASE_VAL"
+
+  # Render the Caddyfile using the domain vars from .env
+  sudo -u ec2-user bash -lc \
+    "cd $REPO_DIR && ./scripts/stack.sh render --target aws-ec2 --profile phase-1"
+
+  # Start the proxy profile (caddy service)
+  sudo -u ec2-user bash -lc \
+    "cd $REPO_DIR && docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d"
+
+  echo "    Caddy started — HTTPS will be available once Let's Encrypt issues the certificate (~30s)"
+else
+  echo "    DOMAIN_BASE not set in SSM — skipping Caddy proxy (HTTP direct access only)"
+  echo "    To enable HTTPS later: push DOMAIN_BASE + DOMAIN_SSL_EMAIL to SSM and re-run this script"
+fi
+
 echo "==> bootstrap-ec2.sh complete at $(date -u)"
 cat <<'EOF'
-    Every service publishes on 127.0.0.1 only, so nothing is reachable from
-    the internet by design. To check health from your machine, forward the
-    Phase 1 ports over SSH — <public-ip> is the `public_ip` terraform output:
+    Services are accessible directly on their ports (3000, 3080, 4000).
+    If DOMAIN_BASE was set, they are also available via HTTPS subdomains
+    (chat.<domain>, langfuse.<domain>, litellm.<domain>).
 
-      ssh -N -L 3000:localhost:3000 -L 4000:localhost:4000 \
-             -L 3080:localhost:3080 -L 8123:localhost:8123 \
-             -L 9002:localhost:9002 ec2-user@<public-ip>
+    To check health from your machine:
 
-    then, with that tunnel open:
+      ./scripts/stack.sh status --target aws-ec2
 
-      ./scripts/stack.sh status --target docker
+    Or connect via SSH:
+
+      ./scripts/stack.sh ssh --target aws-ec2
 EOF
