@@ -42,6 +42,7 @@ x-langfuse-env: &langfuse-env
   # Optional. Blank keeps Langfuse on the OSS feature set.
   LANGFUSE_EE_LICENSE_KEY: ${LANGFUSE_EE_LICENSE_KEY:-}
   TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+  LANGFUSE_MIGRATION_V4_WRITE_MODE: "disabled"
 
   CLICKHOUSE_URL: http://clickhouse:8123
   CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
@@ -233,10 +234,12 @@ services:
   #  Coupled to CLICKHOUSE_IMAGE_TAG above: v4 needs ClickHouse 25.12 or newer.
   #  Moving one without the other breaks the stack.
   #
-  #  No LANGFUSE_MIGRATION_V4_* variables here, deliberately. Those exist for
-  #  upgrading an existing v3 deployment; the upgrade guide is explicit that
-  #  "fresh installs need none of the above". This is a fresh install, so the
-  #  defaults are correct and adding them would only invite confusion.
+  #  LANGFUSE_MIGRATION_V4_WRITE_MODE is set to "disabled" below, against the
+  #  upgrade guide's advice that fresh installs need none of the above. The RC
+  #  changed the default to "events_only", which makes the /api/public/ingestion
+  #  endpoint reject SDK v2 trace-create events (LiteLLM ships Langfuse SDK v2).
+  #  "disabled" restores v3-compatible ingestion so traces flow normally.
+  #  Remove this override once LiteLLM upgrades to Langfuse SDK v3.
   langfuse-worker:
     image: langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-4.0.0-rc.2}
     profiles: [obs]

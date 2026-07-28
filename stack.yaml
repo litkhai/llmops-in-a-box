@@ -292,6 +292,8 @@ layers:
             to: [gpt-4o]
           - from: qwen-7b
             to: [gpt-4o]
+          - from: auto
+            to: [claude-sonnet]
       budget:
         max_budget_usd: 50
         duration: 30d

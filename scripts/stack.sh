@@ -310,6 +310,11 @@ render_litellm() {
     printf '  routing_strategy: %s\n' "$(qs '.layers.gateway.options.routing.strategy')"
     local selected fb_from fb_to keep t
     selected=" $(resolved_models | tr '\n' ' ')"
+    # 'auto' is emitted as an alias when language_routing is enabled; include it
+    # so any stack.yaml fallback with from: auto is not silently dropped.
+    local lr_en_fb
+    lr_en_fb="$(qs '.layers.gateway.options.language_routing.enabled')"
+    [ "$lr_en_fb" = "true" ] && selected="${selected}auto "
     local fb_lines=""
     while IFS= read -r fb_from; do
       [ -n "$fb_from" ] || continue

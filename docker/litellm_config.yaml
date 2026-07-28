@@ -8,6 +8,7 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
       rpm: 500
       tpm: 800000
+      timeout: 5
     model_info:
       mode: chat
       max_input_tokens: 128000
@@ -19,6 +20,7 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       rpm: 500
       tpm: 400000
+      timeout: 5
     model_info:
       mode: chat
       max_input_tokens: 200000
@@ -45,6 +47,7 @@ router_settings:
   fallbacks:
     - { "gpt-4o": [claude-sonnet] }
     - { "claude-sonnet": [gpt-4o] }
+    - { "auto": [claude-sonnet] }
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
