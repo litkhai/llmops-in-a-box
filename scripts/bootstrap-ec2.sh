@@ -14,15 +14,32 @@
 set -euo pipefail
 exec > >(tee /var/log/bootstrap-ec2.log) 2>&1
 
+# This runs headless, so the log is the only place a failed boot can be
+# diagnosed from. Every error path has to say what actually broke.
+die() { echo "ERROR: $*" >&2; exit 1; }
+
 REPO_URL="https://github.com/litkhai/llmops-in-a-box.git"
 REPO_DIR="/opt/llmops-in-a-box"
 SSM_PATH_PREFIX="/sais/phase-1"
 
-# IMDSv2 token (required — instance uses http_tokens = "required")
-TOKEN="$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")"
-REGION="$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-  "http://169.254.169.254/latest/meta-data/placement/region")"
+# Preinstalled on the standard AL2023 AMI but absent from al2023-ami-minimal.
+# Fail here rather than three minutes later, mid-`dnf`.
+command -v aws >/dev/null 2>&1 \
+  || die "the aws CLI is not installed — this script expects the standard AL2023 AMI"
+
+# IMDSv2 (the instance sets http_tokens = "required"). Retried: IMDS sometimes
+# is not answering yet this early in boot, and an empty region would otherwise
+# surface later as an unexplained SSM failure.
+IMDS="http://169.254.169.254"
+IMDS_CURL=(curl -fsS --retry 5 --retry-connrefused --max-time 5)
+
+TOKEN="$("${IMDS_CURL[@]}" -X PUT "$IMDS/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+[ -n "$TOKEN" ] || die "could not obtain an IMDSv2 token from $IMDS"
+
+REGION="$("${IMDS_CURL[@]}" -H "X-aws-ec2-metadata-token: $TOKEN" \
+  "$IMDS/latest/meta-data/placement/region" || true)"
+[ -n "$REGION" ] || die "could not resolve the region from IMDS"
 
 echo "==> bootstrap-ec2.sh starting at $(date -u)"
 echo "    region=$REGION  repo=$REPO_URL"
@@ -55,27 +72,42 @@ chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 echo "    compose $(docker compose version --short)"
 
 # ── 3. Clone repository ───────────────────────────────────────────────────────
-echo "==> Cloning $REPO_URL"
-git clone "$REPO_URL" "$REPO_DIR"
+# Reuse an existing checkout so the script stays re-runnable by hand: reading
+# the log and re-running it is the normal way to debug a failed boot.
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "==> $REPO_DIR already present — reusing it"
+else
+  echo "==> Cloning $REPO_URL"
+  git clone "$REPO_URL" "$REPO_DIR"
+fi
 chown -R ec2-user:ec2-user "$REPO_DIR"
 
 # ── 4. Pull credentials from SSM ─────────────────────────────────────────────
 echo "==> Pulling credentials from SSM  path=$SSM_PATH_PREFIX"
 ENV_FILE="$REPO_DIR/.env"
 
-# Fetch all parameters under the prefix in one API call.
+# Fetch every parameter under the prefix in one call. `--recursive` so a nested
+# layout does not silently return nothing; note the key below keeps only the
+# last path component, so leaf names have to stay unique across groups.
 # Output: tab-separated NAME<TAB>VALUE lines, one per parameter.
-PARAMS="$(aws ssm get-parameters-by-path \
+#
+# stderr is deliberately not discarded. A missing IAM grant and an empty
+# parameter store are different failures and need different fixes.
+if ! PARAMS="$(aws ssm get-parameters-by-path \
   --region "$REGION" \
   --path   "$SSM_PATH_PREFIX" \
+  --recursive \
   --with-decryption \
   --query  'Parameters[*].[Name,Value]' \
-  --output text 2>/dev/null || true)"
+  --output text)"; then
+  die "the SSM GetParametersByPath call failed  region=$REGION path=$SSM_PATH_PREFIX
+       The AWS CLI error is logged directly above. The usual cause is an
+       instance profile without ssm:GetParametersByPath on ${SSM_PATH_PREFIX}/*"
+fi
 
 if [ -z "$PARAMS" ]; then
-  echo "ERROR: no SSM parameters found under $SSM_PATH_PREFIX"
-  echo "       Push credentials first:  ./scripts/stack.sh secrets push --target aws-ec2"
-  exit 1
+  die "the SSM call succeeded but returned no parameters under $SSM_PATH_PREFIX
+       Push credentials first:  ./scripts/stack.sh secrets push --target aws-ec2"
 fi
 
 {
@@ -99,4 +131,16 @@ sudo -u ec2-user bash -lc \
   'cd /opt/llmops-in-a-box && ./scripts/stack.sh up --target docker --profile phase-1'
 
 echo "==> bootstrap-ec2.sh complete at $(date -u)"
-echo "    Verify from your machine:  ./scripts/stack.sh status --target aws-ec2"
+cat <<'EOF'
+    Every service publishes on 127.0.0.1 only, so nothing is reachable from
+    the internet by design. To check health from your machine, forward the
+    Phase 1 ports over SSH — <public-ip> is the `public_ip` terraform output:
+
+      ssh -N -L 3000:localhost:3000 -L 4000:localhost:4000 \
+             -L 3080:localhost:3080 -L 8123:localhost:8123 \
+             -L 9002:localhost:9002 ec2-user@<public-ip>
+
+    then, with that tunnel open:
+
+      ./scripts/stack.sh status --target docker
+EOF
