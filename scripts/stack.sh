@@ -433,6 +433,15 @@ cmd_doctor() {
     else warn "$ab unset — Phase 3 work. Deploy a pod (runpod/deploy_vllm.md) or use --profile phase-1"; fi
   fi
 
+  if resolved_layers | grep -qx observability; then
+    info "Observability"
+    if [ -n "${LANGFUSE_EE_LICENSE_KEY:-}" ]; then
+      ok "Langfuse EE license set"
+    else
+      warn "LANGFUSE_EE_LICENSE_KEY unset — running Langfuse OSS (no SSO, no data-retention policy, no audit log)"
+    fi
+  fi
+
   say ""
   if [ "$fail" -eq 0 ]; then say "${C_GRN}${C_B}preflight passed${C_RST}"
   else die "preflight failed — fix the ✗ items above"; fi
@@ -1846,6 +1855,52 @@ cmd_logs() {
   docker compose ${args[@]+"${args[@]}"} logs -f --tail=100 ${EXTRA_ARGS:+$EXTRA_ARGS}
 }
 
+cmd_smoke_test() {
+  resolve_defaults; load_env
+  local host fail=0 code model tmp
+  host="$(target_host)"
+  model="$(resolved_models | head -1)"
+  [ -n "$model" ] || die "no models resolved for profile=$PROFILE"
+
+  info "Smoke test  ${C_DIM}host=$host  model=$model${C_RST}"
+
+  # 1. LiteLLM liveness
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://$host:4000/health/liveliness" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*) ok "$(printf '%-18s' litellm) $code" ;;
+    *)     bad "$(printf '%-18s' litellm) ${code:-no-response}"; fail=1 ;;
+  esac
+
+  # 2. Langfuse liveness
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://$host:3000/api/public/health" 2>/dev/null || true)"
+  case "$code" in
+    2*|3*) ok "$(printf '%-18s' langfuse) $code" ;;
+    *)     bad "$(printf '%-18s' langfuse) ${code:-no-response}"; fail=1 ;;
+  esac
+
+  # 3. Chat completion round-trip through LiteLLM
+  if [ "$fail" -eq 0 ]; then
+    tmp="$(mktemp)"
+    code="$(curl -s -o "$tmp" -w '%{http_code}' --max-time 30 \
+      -X POST "http://$host:4000/chat/completions" \
+      -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+      -H "Content-Type: application/json" \
+      -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+      2>/dev/null || true)"
+    case "$code" in
+      2*) ok "$(printf '%-18s' chat_completion) $code  model=$model" ;;
+      *)  bad "$(printf '%-18s' chat_completion) ${code:-no-response}"; cat "$tmp" >&2; fail=1 ;;
+    esac
+    rm -f "$tmp"
+  fi
+
+  say ""
+  if [ "$fail" -eq 0 ]; then say "${C_GRN}${C_B}smoke test passed${C_RST}"
+  else die "smoke test failed — fix the ✗ items above"; fi
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 usage() {
   cat <<EOF
@@ -1871,6 +1926,7 @@ ${C_B}COMMANDS${C_RST}
   up          Render, then deploy to the selected target
   down        Tear the selected target down
   status      Curl every health check for the active layers
+  smoke-test  Send a test request end-to-end and verify the trace pipeline
   urls        Print the endpoint list
   logs        Follow compose logs
 
@@ -1952,9 +2008,10 @@ main() {
     render) require_yq; cmd_render ;;
     up)     require_yq; cmd_up ;;
     down)   require_yq; cmd_down ;;
-    status) require_yq; cmd_status ;;
-    urls)   require_yq; cmd_urls ;;
-    logs)   require_yq; cmd_logs ;;
+    status)     require_yq; cmd_status ;;
+    smoke-test) require_yq; cmd_smoke_test ;;
+    urls)       require_yq; cmd_urls ;;
+    logs)       require_yq; cmd_logs ;;
     *) die "unknown command: $cmd  (try: ./scripts/stack.sh help)" ;;
   esac
 }
