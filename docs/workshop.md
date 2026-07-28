@@ -95,7 +95,28 @@ for model in ["gpt-4o", "claude-sonnet"]:
 **Checkpoint:** both traces appear in the same Langfuse project with their own
 latency, token, and cost data. Only the model alias changed in the client.
 
-## 5. Exercise the failure path
+## 5. Generate an image
+
+If `HF_TOKEN` or `CF_API_TOKEN` is configured, LibreChat includes an image
+generation model named `dall-e-3`. Select it in the model picker and send a
+prompt such as:
+
+```
+A photorealistic landscape with mountains and a river at sunrise
+```
+
+LiteLLM routes the request to HuggingFace FLUX.1-schnell and falls back to
+Cloudflare Workers AI automatically if the primary endpoint is unavailable.
+The fallback is transparent — the same `dall-e-3` model name appears in
+Langfuse regardless of which provider served the request.
+
+To check which provider handled a request, open the trace in Langfuse →
+**Tracing** and inspect the `model` field on the generation span.
+
+If neither token is configured, image generation requests return an error;
+the rest of the stack is unaffected.
+
+## 6. Exercise the failure path
 
 ```python
 client.chat.completions.create(
@@ -108,7 +129,7 @@ Check whether the rejected call appears as a failed trace. Rehearse this before
 a live presentation: provider and gateway versions can differ in how early
 they reject an invalid alias.
 
-## 6. Stop the stack
+## 7. Stop the stack
 
 ```bash
 ./scripts/stack.sh down          # keep volumes
@@ -124,6 +145,7 @@ or recreate disposable volumes. Preserve `LANGFUSE_ENCRYPTION_KEY`; losing it
 can make stored encrypted data unreadable.
 
 ## Troubleshooting
+
 
 ??? failure "A published port is already in use"
     Override it for the process:

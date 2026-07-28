@@ -79,7 +79,8 @@ These values must be obtained from their provider or environment:
 | Phase 1 models | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | At least one is needed for the workshop |
 | Optional Langfuse | `LANGFUSE_EE_LICENSE_KEY` | Leave blank for the OSS feature set |
 | Phase 2 | ClickHouse Cloud host, user, password; MCP URL | Use a dedicated read-only database user |
-| Phase 3 | `RUNPOD_API_KEY`, `VLLM_API_BASE`, Hugging Face token if needed | The vLLM base URL must end in `/v1` |
+| Phase 1 image gen | `HF_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; both absent silently disables image generation |
+| Phase 3 | `RUNPOD_API_KEY`, `VLLM_API_BASE`, `VLLM_API_KEY` | The vLLM base URL must end in `/v1` |
 | AWS target | `AWS_PROFILE` or a static access-key pair | Prefer IAM Identity Center / SSO |
 
 The `console` and `notes` fields in the credential inventory contain the
@@ -142,7 +143,7 @@ disabled.
 | `CF_ACCOUNT_ID` | Top-right of any Cloudflare dashboard page under **Account ID**. |
 
 Enter these through the setup menu (they appear under the
-"RunPod / vLLM / HuggingFace / Cloudflare" group):
+"Image generation (HuggingFace / Cloudflare)" group):
 
 ```bash
 ./scripts/stack.sh secrets setup --phase 1
@@ -227,7 +228,7 @@ Copilot can access them.
 - `LITELLM_MASTER_KEY` fronts downstream provider access and spend; protect it
   accordingly.
 - Set a `VLLM_API_KEY` before exposing a RunPod proxy.
-- Never use `0.0.0.0/0` for the planned AWS inbound CIDR.
+- The `allowed_cidr` for the AWS EC2 target defaults to `0.0.0.0/0`; each service has its own application-level authentication. Restrict it further if you want network-level access control in addition.
 - Changing `.env` does not rotate accounts already persisted by databases or
   object stores.
 - Preserve `LANGFUSE_ENCRYPTION_KEY`; losing it can make stored encrypted data

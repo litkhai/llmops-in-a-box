@@ -222,7 +222,7 @@ Detection is a pure Unicode heuristic: if more than 15 % of the message's charac
 
 The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched.
 
-**Fallback:** `claude-sonnet → gpt-4o`. If the Anthropic endpoint is unavailable, LiteLLM retries the request on GPT-4o.
+**Fallback:** `claude-sonnet → gpt-4o` and `gpt-4o → claude-sonnet`. If one provider is unavailable, LiteLLM retries on the other. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
 
 The routing logic lives in `docker/litellm_callbacks.py` as a `CustomLogger` pre-call hook and is controlled by `stack.yaml`:
 
@@ -237,13 +237,58 @@ layers:
         threshold: 0.15
       routing:
         fallbacks:
+          - from: gpt-4o
+            to: [claude-sonnet]
           - from: claude-sonnet
             to: [gpt-4o]
+          - from: auto
+            to: [claude-sonnet]
 ```
 
 When `language_routing.enabled` is `true`, `render` adds `custom_callbacks: [/app/callbacks.py]` to `litellm_settings` in the generated config, and the callback file is mounted read-only into the `litellm` container.
 
 To disable routing and send all requests to a single model, set `language_routing.enabled: false` and re-render.
+
+---
+
+## Image generation
+
+LibreChat exposes a single image model named `dall-e-3`. LiteLLM maps it to
+HuggingFace FLUX.1-schnell and falls back automatically to Cloudflare Workers
+AI FLUX.1-schnell when the primary provider fails. Both providers have a free
+tier.
+
+Image generation is enabled by default when the credentials are present.
+The relevant `stack.yaml` block:
+
+```yaml
+layers:
+  gateway:
+    options:
+      image_generation:
+        enabled: true
+        dalle_alias: dall-e-3
+        providers:
+          huggingface:
+            model: black-forest-labs/FLUX.1-schnell
+            api_key_env: HF_TOKEN
+          cloudflare:
+            model: "@cf/black-forest-labs/flux-1-schnell"
+            api_key_env: CF_API_TOKEN
+            account_id_env: CF_ACCOUNT_ID
+```
+
+`render` translates this into two entries in `litellm_config.yaml` — `dall-e-3`
+(primary) and `dall-e-3-cf` (fallback) — plus a fallback rule that chains them.
+LibreChat only sees `dall-e-3`; the `-cf` alias is invisible to the user.
+
+The credentials (`HF_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`) are optional.
+If absent, `litellm_config.yaml` still contains the model entries but every
+request fails with an API error. To disable cleanly, set
+`image_generation.enabled: false` and re-render.
+
+See [Credentials — Image generation](credentials.md#image-generation-free-tier)
+for token acquisition steps.
 
 ---
 

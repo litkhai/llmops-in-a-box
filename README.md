@@ -5,7 +5,7 @@ A composable LLMOps reference stack built around a single gateway:
 - **LiteLLM** for model routing and cost tracking
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
-- **OpenAI and Anthropic** in the current Phase 1 stack
+- **OpenAI and Anthropic** for chat, and **HuggingFace / Cloudflare** for image generation in the current Phase 1 stack
 - **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
 
 The phases are a build order rather than a menu. The destination is an agent
@@ -32,8 +32,9 @@ names, and deployment targets.
 |---|---|
 | Phase 1 Docker stack | Runnable |
 | OpenAI / Anthropic requests through LiteLLM | Requires at least one provider key |
+| Image generation (HuggingFace FLUX.1-schnell → Cloudflare fallback) | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | Runnable |
-| AWS EC2 target | Declared, Terraform not implemented |
+| AWS EC2 target | Runnable |
 | Phases 2–5 | Not built yet |
 
 If Langfuse traces are missing, a `LANGFUSE_MIGRATION_V4_WRITE_MODE` incompatibility in Langfuse v4 RC builds may be the cause — see [Deployment troubleshooting](https://litkhai.github.io/llmops-in-a-box/deployment/#troubleshooting) for details.

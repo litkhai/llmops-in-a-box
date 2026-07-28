@@ -316,17 +316,24 @@ gateway configuration, not the client protocol.
     Langfuse v4.0.0-rc.2 defaults `LANGFUSE_MIGRATION_V4_WRITE_MODE` to
     `events_only`, which rejects the SDK v2 `trace-create` events that LiteLLM
     sends. The fix is applied in `docker/docker-compose.yml`:
-    `LANGFUSE_MIGRATION_V4_WRITE_MODE: "legacy"`.
+    `LANGFUSE_MIGRATION_V4_WRITE_MODE: "dual"`.
 
     Valid values are `"legacy"` | `"dual"` | `"events_only"` (not `"disabled"` or
-    `"all"` — those fail Zod validation and crash the server on startup). Use
-    `"legacy"` to restore the v3-compatible ingestion path for SDK v2 clients.
+    `"all"` — those fail Zod validation and crash the server on startup).
+
+    - `"events_only"` — default for fresh v4 installs; rejects SDK v2 events.
+    - `"legacy"` — accepts SDK v2 events but crashes the **worker** when
+      `LANGFUSE_MIGRATION_V4_NATIVE_OTEL_BEHAVIOUR=direct` (the v4 fresh-install
+      default) is also set.
+    - `"dual"` — writes to both v3 and v4 paths; compatible with both the SDK v2
+      client (LiteLLM) and the fresh-install worker config. This is the correct
+      value for this stack.
 
     Verify the env var is live in the running container:
 
     ```bash
     docker compose --project-name sais exec langfuse-web env | grep MIGRATION
-    # expected: LANGFUSE_MIGRATION_V4_WRITE_MODE=legacy
+    # expected: LANGFUSE_MIGRATION_V4_WRITE_MODE=dual
     ```
 
     Test the ingestion endpoint (include a `timestamp` field — v4 requires it):
