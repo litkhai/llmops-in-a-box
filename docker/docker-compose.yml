@@ -42,7 +42,7 @@ x-langfuse-env: &langfuse-env
   # Optional. Blank keeps Langfuse on the OSS feature set.
   LANGFUSE_EE_LICENSE_KEY: ${LANGFUSE_EE_LICENSE_KEY:-}
   TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
-  LANGFUSE_MIGRATION_V4_WRITE_MODE: "disabled"
+  LANGFUSE_MIGRATION_V4_WRITE_MODE: "all"
 
   CLICKHOUSE_URL: http://clickhouse:8123
   CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
