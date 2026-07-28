@@ -977,8 +977,10 @@ classify_credential_technology() {
       CREDENTIAL_GROUP_ID="librechat"; CREDENTIAL_GROUP_NAME="LibreChat" ;;
     CLICKHOUSE_CLOUD_*|MCP_CLICKHOUSE_*)
       CREDENTIAL_GROUP_ID="clickhouse-cloud"; CREDENTIAL_GROUP_NAME="ClickHouse Cloud / MCP" ;;
-    RUNPOD_*|VLLM_*|HF_TOKEN|CF_API_TOKEN|CF_ACCOUNT_ID)
-      CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM / HuggingFace / Cloudflare" ;;
+    HF_TOKEN|CF_API_TOKEN|CF_ACCOUNT_ID)
+      CREDENTIAL_GROUP_ID="image-gen"; CREDENTIAL_GROUP_NAME="Image generation (HuggingFace / Cloudflare)" ;;
+    RUNPOD_*|VLLM_*)
+      CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM (Phase 3)" ;;
     AWS_*)
       CREDENTIAL_GROUP_ID="aws"; CREDENTIAL_GROUP_NAME="AWS authentication / EC2" ;;
     DOMAIN_*)
