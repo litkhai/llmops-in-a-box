@@ -316,23 +316,33 @@ gateway configuration, not the client protocol.
     Langfuse v4.0.0-rc.2 defaults `LANGFUSE_MIGRATION_V4_WRITE_MODE` to
     `events_only`, which rejects the SDK v2 `trace-create` events that LiteLLM
     sends. The fix is applied in `docker/docker-compose.yml`:
-    `LANGFUSE_MIGRATION_V4_WRITE_MODE: "disabled"`.
+    `LANGFUSE_MIGRATION_V4_WRITE_MODE: "legacy"`.
 
-    Verify the ingestion endpoint accepts trace events:
+    Valid values are `"legacy"` | `"dual"` | `"events_only"` (not `"disabled"` or
+    `"all"` — those fail Zod validation and crash the server on startup). Use
+    `"legacy"` to restore the v3-compatible ingestion path for SDK v2 clients.
+
+    Verify the env var is live in the running container:
 
     ```bash
-    curl -s -X POST https://langfuse.clickhouse.kr/api/public/ingestion \
+    docker compose --project-name sais exec langfuse-web env | grep MIGRATION
+    # expected: LANGFUSE_MIGRATION_V4_WRITE_MODE=legacy
+    ```
+
+    Test the ingestion endpoint (include a `timestamp` field — v4 requires it):
+
+    ```bash
+    curl -s -X POST http://localhost:3000/api/public/ingestion \
       -H "Content-Type: application/json" \
       -u "${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}" \
-      -d '{"batch":[{"id":"test-1","type":"trace-create","body":{"id":"test-trace","name":"test"}}]}'
+      -d '{"batch":[{"id":"t1","timestamp":"2026-01-01T00:00:00Z","type":"trace-create","body":{"id":"test","name":"test","timestamp":"2026-01-01T00:00:00Z"}}]}'
     ```
 
-    A healthy response is `{"successes":[...],"errors":[]}`. If the error
-    recurs, confirm the env var is set in the running container:
+    A healthy response is `{"successes":[{"id":"t1","status":201}],"errors":[]}`.
 
-    ```bash
-    docker compose exec langfuse-web env | grep MIGRATION
-    ```
+    **Important:** `docker compose restart` does not apply env var changes from
+    `docker-compose.yml`. Use `docker compose up -d --no-deps langfuse-web langfuse-worker`
+    to recreate the containers and pick up the new value.
 
     Remove the override once LiteLLM upgrades its bundled Langfuse SDK from
     v2 to v3, which uses the new v4 ingestion path.
