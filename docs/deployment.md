@@ -12,7 +12,7 @@ For first-time machine and credential preparation, start with
 | Target | Lifecycle | Status |
 |---|---|---|
 | `docker` | Docker Compose | **Runnable** |
-| `aws-ec2` | Terraform → EC2 → Compose | Declared; `terraform/` not implemented |
+| `aws-ec2` | Terraform → EC2 → Compose | **Runnable** |
 | `k8s` | Helm | Planned and disabled |
 
 ## Docker
@@ -73,23 +73,113 @@ the service or recreate disposable volumes.
 
 ## AWS EC2
 
-The intended target is a single EC2 instance bootstrapped with the same Compose
-stack. Its target metadata and credential fields exist in `stack.yaml`, but
-there is no `terraform/` implementation yet. Consequently:
+A single EC2 instance running the same Docker Compose stack as the local
+target. Region: `ap-northeast-2`. Instance: `t3.xlarge`, 100 GiB gp3.
+
+### Prerequisites
+
+| Requirement | Check |
+|---|---|
+| AWS CLI v2 configured | `aws sts get-caller-identity` |
+| EC2 key pair in `ap-northeast-2` | AWS console → EC2 → Key Pairs |
+| Terraform ≥ 1.5 | `terraform version` |
+| Phase 1 credentials set locally | `./scripts/stack.sh secrets status --phase 1` |
+
+### 1. Push credentials to SSM
+
+The EC2 instance reads Phase 1 credentials from SSM Parameter Store at boot.
+Push them before provisioning:
 
 ```bash
-./scripts/stack.sh up --target aws-ec2
+./scripts/stack.sh secrets push --target aws-ec2
 ```
 
-exits with an implementation error; it does not provision AWS resources.
+This writes every set Phase 1 credential as an SSM `SecureString` parameter
+under `/sais/phase-1/`. The EC2 IAM role (provisioned by Terraform) grants
+read access to that prefix only — no other AWS resources are reachable.
 
-The planned authentication paths are:
+Verify:
 
-- IAM Identity Center through `AWS_PROFILE` (preferred)
-- a scoped static access-key pair where SSO is unavailable
+```bash
+aws ssm get-parameters-by-path \
+  --region ap-northeast-2 \
+  --path /sais/phase-1 \
+  --query 'Parameters[*].Name'
+```
 
-The planned target will also require a narrow inbound CIDR. Never expose a demo
-stack holding provider keys through `0.0.0.0/0`.
+### 2. Provision and bootstrap
+
+```bash
+./scripts/stack.sh up --target aws-ec2 \
+    --tf-var key_name=<your-key-pair-name> \
+    --tf-var allowed_cidr=<your-ip>/32
+```
+
+This runs `terraform apply`, then waits up to 5 minutes for the bootstrap
+script to complete. The bootstrap script installs Docker, clones this
+repository, pulls credentials from SSM, and starts the Phase 1 compose stack.
+
+Get your public IP: `curl -s https://checkip.amazonaws.com`
+
+!!! warning "Never use `0.0.0.0/0` for `allowed_cidr`"
+    The stack holds live provider API keys. An open security group is a
+    billing and data-exposure risk. Terraform's variable validation will
+    reject `0.0.0.0/0` outright.
+
+### 3. Verify
+
+```bash
+./scripts/stack.sh status --target aws-ec2
+./scripts/stack.sh urls --target aws-ec2
+```
+
+If bootstrap is still running, inspect the log:
+
+```bash
+./scripts/stack.sh ssh --target aws-ec2
+# on the instance:
+sudo tail -f /var/log/bootstrap-ec2.log
+```
+
+### 4. Tear down
+
+```bash
+./scripts/stack.sh down --target aws-ec2
+```
+
+Runs `terraform destroy`. Removes the EC2 instance and security group. SSM
+parameters are **not** deleted automatically — clean them up separately:
+
+```bash
+aws ssm delete-parameters \
+  --region ap-northeast-2 \
+  --names $(aws ssm get-parameters-by-path \
+    --region ap-northeast-2 \
+    --path /sais/phase-1 \
+    --query 'Parameters[*].Name' \
+    --output text)
+```
+
+### Credential rotation
+
+Database credentials written into persistent volumes (Postgres, ClickHouse,
+MinIO, MongoDB) do not rotate when SSM parameters change. After changing a
+credential:
+
+1. Update the SSM value: `./scripts/stack.sh secrets push --target aws-ec2`
+2. Either recreate the affected service volume, or run `down --purge` and
+   reprovision from scratch.
+
+### Approximate cost
+
+| Resource | On-demand, ap-northeast-2 |
+|---|---|
+| t3.xlarge | ~$120 / month |
+| 100 GiB gp3 EBS | ~$8 / month |
+| Data transfer | usage-dependent |
+
+Stop or terminate the instance when not in use. This is a demo stack, not a
+production service.
 
 ## External vLLM serving
 
@@ -139,6 +229,6 @@ gateway configuration, not the client protocol.
     LiteLLM reads Langfuse keys at startup. Validate the credentials, then run
     `./scripts/stack.sh up` again to reload them.
 
-??? question "The AWS or Kubernetes target refuses to start"
-    Expected in the current repository. Those targets are declarations of the
-    intended interface, not completed deployment artifacts.
+??? question "The Kubernetes target refuses to start"
+    Expected in the current repository. That target is a declaration of the
+    intended interface, not a completed deployment artifact.

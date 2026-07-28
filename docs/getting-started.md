@@ -9,11 +9,8 @@ eventually runs.
 | Target | Use it for | Status |
 |---|---|---|
 | `docker` | Local development and the current demo | **Runnable** |
-| `aws-ec2` | A single EC2 host running the same Compose stack | Declared; Terraform is not implemented |
+| `aws-ec2` | A single EC2 host running the same Compose stack | **Runnable** |
 | `k8s` | A future production deployment | Planned |
-
-Use Docker today. The AWS target is retained in `stack.yaml` to define the
-target interface, but `stack.sh` exits until `terraform/` exists.
 
 ## 2. Prepare Docker
 
@@ -86,16 +83,6 @@ The machine and credentials are now ready:
 Continue with the [Phase 1 workshop](workshop.md) to send a request, inspect
 its trace, compare providers, and tear the stack down.
 
-## AWS preparation
-
-AWS is not runnable yet, but the intended authentication choices are already
-represented by the credential inventory:
-
-- Prefer an IAM Identity Center profile in `AWS_PROFILE`.
-- Where SSO is unavailable, use both `AWS_ACCESS_KEY_ID` and
-  `AWS_SECRET_ACCESS_KEY`.
-- Never set the planned inbound CIDR to `0.0.0.0/0`.
-
-Credential collection can be completed before Terraform is added. Do not
-expect `./scripts/stack.sh up --target aws-ec2` to provision anything in the
-current repository.
+To deploy to AWS EC2 instead of running locally, follow the
+[AWS EC2 deployment guide](deployment.md#aws-ec2). You will need Terraform ≥ 1.5,
+an AWS account with EC2 and SSM access, and an EC2 key pair in `ap-northeast-2`.
