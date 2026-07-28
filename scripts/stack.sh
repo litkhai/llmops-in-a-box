@@ -278,7 +278,7 @@ render_litellm() {
     fi
 
     # ── image generation models (dall-e-3 alias → HF primary, CF fallback) ──
-    local img_enabled dalle_alias hf_model hf_key cf_model cf_key cf_account cf_fb_alias
+    local img_enabled dalle_alias hf_model hf_key cf_model cf_key cf_account cf_fb_alias img_timeout
     img_enabled="$(qs '.layers.gateway.options.image_generation.enabled')"
     if [ "$img_enabled" = "true" ]; then
       dalle_alias="$(qs '.layers.gateway.options.image_generation.dalle_alias')"
@@ -287,18 +287,21 @@ render_litellm() {
       cf_model="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.model')"
       cf_key="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.api_key_env')"
       cf_account="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.account_id_env')"
+      img_timeout="$(qs '.layers.gateway.options.image_generation.timeout')"
       cf_fb_alias="${dalle_alias}-cf"
       printf '  - model_name: %s\n' "$dalle_alias"
       printf '    litellm_params:\n'
       printf '      model: huggingface/%s\n' "$hf_model"
-      [ -n "$hf_key" ] && printf '      api_key: os.environ/%s\n' "$hf_key"
+      [ -n "$hf_key" ]      && printf '      api_key: os.environ/%s\n' "$hf_key"
+      [ -n "$img_timeout" ] && printf '      timeout: %s\n' "$img_timeout"
       printf '    model_info:\n'
       printf '      mode: image_generation\n'
       printf '  - model_name: %s\n' "$cf_fb_alias"
       printf '    litellm_params:\n'
       printf '      model: cloudflare/%s\n' "$cf_model"
-      [ -n "$cf_key" ]     && printf '      api_key: os.environ/%s\n' "$cf_key"
-      [ -n "$cf_account" ] && printf '      cf_account_id: os.environ/%s\n' "$cf_account"
+      [ -n "$cf_key" ]      && printf '      api_key: os.environ/%s\n' "$cf_key"
+      [ -n "$cf_account" ]  && printf '      cf_account_id: os.environ/%s\n' "$cf_account"
+      [ -n "$img_timeout" ] && printf '      timeout: %s\n' "$img_timeout"
       printf '    model_info:\n'
       printf '      mode: image_generation\n'
     fi

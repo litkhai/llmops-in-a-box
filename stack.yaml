@@ -299,6 +299,9 @@ layers:
         # LibreChat requests this model name for image generation.
         # LiteLLM maps it to HuggingFace FLUX; Cloudflare is the fallback.
         dalle_alias: dall-e-3
+        # Image generation takes 10-60 s. Override the global request_timeout_s
+        # (5 s for chat) so these models are not killed mid-generation.
+        timeout: 90
         providers:
           huggingface:
             model: black-forest-labs/FLUX.1-schnell

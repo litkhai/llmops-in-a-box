@@ -35,6 +35,7 @@ model_list:
     litellm_params:
       model: huggingface/black-forest-labs/FLUX.1-schnell
       api_key: os.environ/HF_TOKEN
+      timeout: 90
     model_info:
       mode: image_generation
   - model_name: dall-e-3-cf
@@ -42,6 +43,7 @@ model_list:
       model: cloudflare/@cf/black-forest-labs/flux-1-schnell
       api_key: os.environ/CF_API_TOKEN
       cf_account_id: os.environ/CF_ACCOUNT_ID
+      timeout: 90
     model_info:
       mode: image_generation
 
