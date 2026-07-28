@@ -22,8 +22,12 @@ resource "aws_instance" "stack" {
     http_put_response_hop_limit = 1
   }
 
-  tags = {
-    Name    = "${var.project_slug}-stack"
-    Project = var.project_slug
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_slug}-stack"
+    Role = "llmops-stack"
+  })
+
+  volume_tags = merge(local.common_tags, {
+    Name = "${var.project_slug}-stack-root"
+  })
 }

@@ -40,11 +40,10 @@ resource "aws_security_group" "stack" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Outbound — provider API calls and package downloads"
+    description = "Outbound - provider API calls and package downloads"
   }
 
-  tags = {
-    Name    = "${var.project_slug}-stack"
-    Project = var.project_slug
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_slug}-stack-sg"
+  })
 }

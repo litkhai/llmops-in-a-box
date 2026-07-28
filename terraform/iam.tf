@@ -12,9 +12,9 @@ resource "aws_iam_role" "ec2" {
     }]
   })
 
-  tags = {
-    Project = var.project_slug
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.project_slug}-ec2-role"
+  })
 }
 
 resource "aws_iam_role_policy" "ssm_read" {
@@ -37,4 +37,8 @@ resource "aws_iam_role_policy" "ssm_read" {
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project_slug}-ec2"
   role = aws_iam_role.ec2.name
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_slug}-ec2-profile"
+  })
 }
