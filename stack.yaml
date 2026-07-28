@@ -613,6 +613,13 @@ secrets:
       - LIBRECHAT_CREDS_IV
       - LIBRECHAT_JWT_SECRET
       - LIBRECHAT_JWT_REFRESH_SECRET
+      # SMTP — Langfuse invitation and password-reset emails.
+      # Uses Gmail App Password or any SMTP provider.
+      - LANGFUSE_EMAIL_HOST
+      - LANGFUSE_EMAIL_PORT
+      - LANGFUSE_EMAIL_USER
+      - LANGFUSE_EMAIL_PASSWORD
+      - LANGFUSE_EMAIL_FROM
       # Domain / HTTPS proxy — aws-ec2 target only.
       # Set interactively: ./scripts/stack.sh secrets domain
       - DOMAIN_BASE

@@ -71,6 +71,15 @@ x-langfuse-env: &langfuse-env
   LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
   LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
 
+  # SMTP — required for invitation emails and password resets.
+  # Leave EMAIL_HOST blank to disable email (invites won't be sent).
+  EMAIL_HOST: ${LANGFUSE_EMAIL_HOST:-}
+  EMAIL_PORT: ${LANGFUSE_EMAIL_PORT:-465}
+  EMAIL_USERNAME: ${LANGFUSE_EMAIL_USER:-}
+  EMAIL_PASSWORD: ${LANGFUSE_EMAIL_PASSWORD:-}
+  EMAIL_FROM_ADDRESS: ${LANGFUSE_EMAIL_FROM:-}
+  EMAIL_FROM_NAME: ${LANGFUSE_EMAIL_FROM_NAME:-LLMOps in a Box}
+
   # Media is fetched by the BROWSER, not by Langfuse, so this one must be the
   # host-published address rather than the in-network one. Getting this wrong
   # produces a UI that loads but shows broken attachments.
