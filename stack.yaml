@@ -256,10 +256,27 @@ layers:
       callbacks:
         success: [langfuse]
         failure: [langfuse]
+      language_routing:
+        # Automatic language detection routes requests before they reach the
+        # model. The callback (docker/litellm_callbacks.py) inspects the last
+        # user message and rewrites the model field:
+        #   - Non-Latin-primary text (Korean, Japanese, etc.) → multilingual_model
+        #   - Latin-primary text (English, etc.)              → english_model
+        # Clients that explicitly request a model other than the two aliases
+        # below are not affected. The threshold is the fraction of characters
+        # above U+024F required to classify a message as non-Latin.
+        enabled: true
+        english_model: gpt-4o
+        multilingual_model: claude-sonnet
+        threshold: 0.15
       routing:
         strategy: simple-shuffle
-        # If the self-hosted pod is cold or down, fall back to an API model.
+        # claude-sonnet falls back to gpt-4o so a multilingual request still
+        # succeeds if the Anthropic API is unavailable or rate-limited.
+        # qwen-7b falls back to gpt-4o when the self-hosted pod is cold or down.
         fallbacks:
+          - from: claude-sonnet
+            to: [gpt-4o]
           - from: qwen-7b
             to: [gpt-4o]
       budget:

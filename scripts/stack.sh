@@ -278,6 +278,11 @@ render_litellm() {
     elif [ -n "$budget" ]; then
       warn "budget.max_budget_usd is set but budget.duration is not — omitting both, LiteLLM requires the pair"
     fi
+    local lr_enabled
+    lr_enabled="$(qs '.layers.gateway.options.language_routing.enabled')"
+    if [ "$lr_enabled" = "true" ]; then
+      printf '  custom_callbacks: [/app/callbacks.py]\n'
+    fi
 
     # ── router_settings — only emit fallbacks whose models are all present ──
     printf '\nrouter_settings:\n'
