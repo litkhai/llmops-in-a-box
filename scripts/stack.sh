@@ -409,6 +409,31 @@ render_librechat() {
       desc="$(model_field "$a" '.ui.description')"
       printf '#   %-14s %s — %s\n' "$a" "$label" "$desc"
     done < <(resolved_models)
+
+    # ── MCP servers (Phase 2 tools layer) ────────────────────────────────────
+    local has_mcp=0
+    if resolved_layers | grep -qx tools; then
+      local srv_name srv_enabled transport
+      while IFS= read -r srv_name; do
+        [ -n "$srv_name" ] || continue
+        srv_enabled="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .enabled")"
+        [ "$srv_enabled" = "true" ] || continue
+        transport="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .transport")"
+        if [ "$has_mcp" -eq 0 ]; then
+          printf '\nmcpServers:\n'
+          has_mcp=1
+        fi
+        printf '  %s:\n' "$srv_name"
+        case "$transport" in
+          sse)
+            printf '    type: sse\n'
+            printf '    url: "http://mcp-%s:9100/sse"\n' "$srv_name"
+            printf '    timeout: 60000\n'
+            printf '    initTimeout: 30000\n'
+            ;;
+        esac
+      done < <(q '.layers.tools.options.servers[].name')
+    fi
   } > "$out"
 
   ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")"

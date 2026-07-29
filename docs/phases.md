@@ -63,7 +63,7 @@ are cumulative.
 | Phase | Outcome | Status |
 |:--:|---|---|
 | 1 | Frontier models through LiteLLM, traced in Langfuse | **Runnable — Docker and AWS EC2** |
-| 2 | MCP tool layer | Not built yet |
+| 2 | MCP tool layer | **Runnable — ClickHouse Cloud via MCP** |
 | 3 | Self-hosted vLLM serving | Not built yet |
 | 4 | Artifact storage and KV-cache reuse | Not built yet |
 | 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |

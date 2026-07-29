@@ -437,6 +437,34 @@ services:
       retries: 30
       start_period: 40s
 
+  # ══ tools — MCP server layer (Phase 2) ═══════════════════════════════════════
+  #
+  # Exposes the ClickHouse Cloud schema and query tools to LibreChat Agents
+  # via the Model Context Protocol (SSE transport). Start with --profile tools
+  # or use `./scripts/stack.sh up --profile phase-2`.
+
+  mcp-clickhouse:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    profiles: [tools]
+    restart: unless-stopped
+    environment:
+      # mcp-clickhouse reads these env vars to connect to ClickHouse Cloud.
+      CLICKHOUSE_HOST: ${CLICKHOUSE_CLOUD_HOST:?CLICKHOUSE_CLOUD_HOST required for MCP}
+      CLICKHOUSE_USER: ${CLICKHOUSE_CLOUD_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_CLOUD_PASSWORD:?CLICKHOUSE_CLOUD_PASSWORD required for MCP}
+      CLICKHOUSE_SECURE: "true"
+      CLICKHOUSE_VERIFY: "true"
+    ports:
+      - "0.0.0.0:9100:9100"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://0.0.0.0:9100/sse',timeout=3); sys.exit(0 if r.status in (200,405) else 1)\" 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   # ── Caddy reverse proxy (aws-ec2 only) ───────────────────────────────────────
   #
   # Launched separately via `--profile proxy` after the core stack is up.

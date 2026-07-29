@@ -393,18 +393,18 @@ layers:
   # ── Phase 2 — MCP tool layer ──
   tools:
     phase: 2
-    enabled: false              # flip to true when the first server lands
+    enabled: true
     impl: mcp
     managed_by: compose
     compose_profile: tools
     port: 9100
     requires: [gateway]
     options:
-      # First target: ClickHouse Cloud, so agents can query the warehouse and
-      # every tool call is traced through the same LiteLLM → Langfuse path.
+      # ClickHouse Cloud: agents can query the warehouse and every tool call
+      # is traced through the same LiteLLM → Langfuse path.
       servers:
         - name: clickhouse
-          enabled: false
+          enabled: true
           transport: sse
           url_env: MCP_CLICKHOUSE_URL
           credentials_env: [CLICKHOUSE_CLOUD_HOST, CLICKHOUSE_CLOUD_USER, CLICKHOUSE_CLOUD_PASSWORD]
