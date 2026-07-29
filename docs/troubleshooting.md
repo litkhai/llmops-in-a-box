@@ -129,9 +129,8 @@ Phase 1 stack.
     **Symptom:** The LiteLLM image generation endpoint returns an empty `data`
     array in ~17 ms. No image is produced and no error is logged.
 
-    **Cause:** LiteLLM proxy does not natively support Cloudflare Workers AI or
-    HuggingFace as image generation backends. It returns an empty response
-    without error.
+    **Cause:** LiteLLM proxy does not natively support Cloudflare Workers AI as
+    an image generation backend. It returns an empty response without error.
 
     **Fix:** Call the provider APIs directly using `httpx` inside the callback.
     Do not route image generation through LiteLLM's `/v1/images/generations`

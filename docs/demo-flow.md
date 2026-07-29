@@ -70,7 +70,7 @@ for lang, msg in [
 - Applications do not change when models do. That is the migration story in one line.
 - Fallback is automatic: if one provider is unavailable, LiteLLM retries on the other. The client always gets a response.
 
-### Image generation: Cloudflare → HuggingFace fallback
+### Image generation via Cloudflare Workers AI
 
 Type an image-intent message directly in the `auto` chat window — no model switch, no separate UI. The `UnifiedRouter` callback detects image keywords in the message, calls Cloudflare Workers AI (FLUX.1-schnell) directly, stores the generated image in MinIO, and injects a markdown image link into the chat response. LibreChat renders the image inline.
 
@@ -82,8 +82,7 @@ generate an image of a mountain landscape at sunrise
 **Talking points**
 
 - The chat model picker never changes — `auto` is the only choice. Text, language detection, and image generation are all handled by one callback in the gateway.
-- Cloudflare Workers AI is the primary provider; HuggingFace FLUX.1-schnell is the fallback.
-- Both providers are free tier. No credit card, no GPU. The same fallback pattern scales to paid providers.
+- Cloudflare Workers AI (FLUX.1-schnell) is free tier. No credit card, no GPU.
 
 Include in the run:
 

@@ -5,12 +5,13 @@ Two routing decisions are made here before the request reaches a provider:
 
 1. IMAGE ROUTING — if the last user message contains image-generation intent
    keywords, the callback:
-     a. Starts image generation as a background asyncio task (HF → CF fallback
-        handled by LiteLLM router; call traced in Langfuse independently).
-     b. Routes the chat request to a cheap LLM call (max_tokens=1, stream=False)
-        so a response object exists for the post-call hook to intercept.
-     c. In async_post_call_success_hook, awaits the image task and replaces the
-        response content with a markdown image tag before it reaches the client.
+     a. Starts image generation as a background asyncio task (Cloudflare
+        Workers AI FLUX.1-schnell; call traced in Langfuse independently).
+     b. Routes the chat request to a cheap LLM call (max_tokens=1) so a
+        response object exists for the post-call hook to intercept.
+     c. In async_post_call_streaming_iterator_hook, drains the 1-token stream,
+        awaits the image task, and yields a replacement SSE chunk containing
+        a markdown image tag before it reaches the client.
 
    LibreChat renders the markdown image tag inline in the chat message.
 
@@ -97,27 +98,6 @@ async def _call_cloudflare(prompt: str, client: httpx.AsyncClient) -> str:
     return b64
 
 
-async def _call_huggingface(prompt: str, client: httpx.AsyncClient) -> str:
-    """
-    Call HuggingFace Inference API (FLUX.1-schnell).
-    Returns a base64-encoded PNG string.
-    """
-    import base64
-
-    hf_token = os.environ.get("HF_TOKEN", "")
-    resp = await client.post(
-        "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
-        json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
-        headers={"Authorization": f"Bearer {hf_token}"},
-        timeout=90.0,
-    )
-    resp.raise_for_status()
-    ct = resp.headers.get("content-type", "")
-    if "image" not in ct:
-        raise ValueError(f"HF returned non-image content-type={ct!r}: {resp.text[:200]}")
-    return base64.b64encode(resp.content).decode()
-
-
 def _minio_put_url(bucket: str, key: str, img_bytes: bytes) -> str:
     """
     Upload image bytes to MinIO using AWS SigV4 (pure stdlib).
@@ -190,24 +170,21 @@ def _minio_put_url(bucket: str, key: str, img_bytes: bytes) -> str:
 
 async def _generate_image(prompt: str) -> str:
     """
-    Generate an image via Cloudflare FLUX.1-schnell (HuggingFace fallback),
+    Generate an image via Cloudflare Workers AI (FLUX.1-schnell),
     upload to MinIO, and return a markdown image tag with a public URL.
     """
     async with httpx.AsyncClient() as client:
-        last_exc: Exception | None = None
-        for fn in (_call_cloudflare, _call_huggingface):
-            try:
-                b64 = await fn(prompt, client)
-                img_bytes = base64.b64decode(b64)
-                key = f"generated/{uuid.uuid4().hex}.jpg"
-                loop = asyncio.get_event_loop()
-                url = await loop.run_in_executor(
-                    None, _minio_put_url, "images", key, img_bytes
-                )
-                return f"![generated image]({url})"
-            except Exception as exc:
-                last_exc = exc
-    return f"Image generation failed: {last_exc}"
+        try:
+            b64 = await _call_cloudflare(prompt, client)
+            img_bytes = base64.b64decode(b64)
+            key = f"generated/{uuid.uuid4().hex}.jpg"
+            loop = asyncio.get_event_loop()
+            url = await loop.run_in_executor(
+                None, _minio_put_url, "images", key, img_bytes
+            )
+            return f"![generated image]({url})"
+        except Exception as exc:
+            return f"Image generation failed: {exc}"
 
 
 # ── callback ──────────────────────────────────────────────────────────────────

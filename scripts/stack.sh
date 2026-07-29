@@ -277,26 +277,16 @@ render_litellm() {
       printf '      mode: chat\n'
     fi
 
-    # ── image generation models (dall-e-3 alias → HF primary, CF fallback) ──
-    local img_enabled dalle_alias hf_model hf_key cf_model cf_key cf_account cf_fb_alias img_timeout
+    # ── image generation model (dall-e-3 alias → Cloudflare FLUX.1-schnell) ──
+    local img_enabled dalle_alias cf_model cf_key cf_account img_timeout
     img_enabled="$(qs '.layers.gateway.options.image_generation.enabled')"
     if [ "$img_enabled" = "true" ]; then
       dalle_alias="$(qs '.layers.gateway.options.image_generation.dalle_alias')"
-      hf_model="$(qs '.layers.gateway.options.image_generation.providers.huggingface.model')"
-      hf_key="$(qs '.layers.gateway.options.image_generation.providers.huggingface.api_key_env')"
       cf_model="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.model')"
       cf_key="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.api_key_env')"
       cf_account="$(qs '.layers.gateway.options.image_generation.providers.cloudflare.account_id_env')"
       img_timeout="$(qs '.layers.gateway.options.image_generation.timeout')"
-      cf_fb_alias="${dalle_alias}-cf"
       printf '  - model_name: %s\n' "$dalle_alias"
-      printf '    litellm_params:\n'
-      printf '      model: huggingface/%s\n' "$hf_model"
-      [ -n "$hf_key" ]      && printf '      api_key: os.environ/%s\n' "$hf_key"
-      [ -n "$img_timeout" ] && printf '      timeout: %s\n' "$img_timeout"
-      printf '    model_info:\n'
-      printf '      mode: image_generation\n'
-      printf '  - model_name: %s\n' "$cf_fb_alias"
       printf '    litellm_params:\n'
       printf '      model: cloudflare/%s\n' "$cf_model"
       [ -n "$cf_key" ]      && printf '      api_key: os.environ/%s\n' "$cf_key"
@@ -355,19 +345,9 @@ render_litellm() {
       [ -n "$keep" ] && fb_lines="$fb_lines    - { \"$fb_from\": [$keep] }
 "
     done < <(q '.layers.gateway.options.routing.fallbacks[].from')
-    # image gen fallback: dall-e-3 (HF) → dall-e-3-cf (Cloudflare)
-    local img_fb_line=""
-    if [ "$(qs '.layers.gateway.options.image_generation.enabled')" = "true" ]; then
-      local _da _cf
-      _da="$(qs '.layers.gateway.options.image_generation.dalle_alias')"
-      _cf="${_da}-cf"
-      img_fb_line="    - { \"$_da\": [$_cf] }
-"
-    fi
-    if [ -n "$fb_lines" ] || [ -n "$img_fb_line" ]; then
+    if [ -n "$fb_lines" ]; then
       printf '  fallbacks:\n'
       printf '%s' "$fb_lines"
-      printf '%s' "$img_fb_line"
     fi
 
     printf '\ngeneral_settings:\n'
@@ -767,7 +747,7 @@ validate_credential_value() {
   case "$env" in
     OPENAI_API_KEY|ANTHROPIC_API_KEY|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|\
     LANGFUSE_EE_LICENSE_KEY|\
-    RUNPOD_API_KEY|VLLM_API_KEY|HF_TOKEN|CF_API_TOKEN|CF_ACCOUNT_ID|\
+    RUNPOD_API_KEY|VLLM_API_KEY|CF_API_TOKEN|CF_ACCOUNT_ID|\
     AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)
       case "$val" in *[[:space:]]*) VALIDATION_MESSAGE="must not contain whitespace"; return 1 ;; esac ;;
   esac
@@ -808,9 +788,6 @@ validate_credential_value() {
         ?*@?*.?*) : ;;
         *) VALIDATION_MESSAGE="expected an email address"; return 1 ;;
       esac ;;
-    HF_TOKEN)
-      case "$val" in hf_?*) [ "${#val}" -ge 10 ] || { VALIDATION_MESSAGE="expected a HuggingFace token (hf_...)"; return 1; } ;;
-        *) VALIDATION_MESSAGE="expected prefix hf_"; return 1 ;; esac ;;
     VLLM_API_BASE)
       case "$val" in http://*/v1|https://*/v1) : ;; *) VALIDATION_MESSAGE="expected an http(s) URL ending in /v1"; return 1 ;; esac ;;
     MCP_CLICKHOUSE_URL)
@@ -986,8 +963,8 @@ classify_credential_technology() {
       CREDENTIAL_GROUP_ID="librechat"; CREDENTIAL_GROUP_NAME="LibreChat" ;;
     CLICKHOUSE_CLOUD_*|MCP_CLICKHOUSE_*)
       CREDENTIAL_GROUP_ID="clickhouse-cloud"; CREDENTIAL_GROUP_NAME="ClickHouse Cloud / MCP" ;;
-    HF_TOKEN|CF_API_TOKEN|CF_ACCOUNT_ID)
-      CREDENTIAL_GROUP_ID="image-gen"; CREDENTIAL_GROUP_NAME="Image generation (HuggingFace / Cloudflare)" ;;
+    CF_API_TOKEN|CF_ACCOUNT_ID)
+      CREDENTIAL_GROUP_ID="image-gen"; CREDENTIAL_GROUP_NAME="Image generation (Cloudflare Workers AI)" ;;
     RUNPOD_*|VLLM_*)
       CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM (Phase 3)" ;;
     AWS_*)

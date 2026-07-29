@@ -376,15 +376,11 @@ gateway configuration, not the client protocol.
     ```
 
 ??? question "Image generation returns an error"
-    The `UnifiedRouter` callback calls Cloudflare Workers AI first. If
-    Cloudflare fails, it falls back to HuggingFace. No action is required for
-    a transient error — the fallback is transparent to LibreChat.
-
-    If both providers fail, verify that `HF_TOKEN`, `CF_API_TOKEN`, and
-    `CF_ACCOUNT_ID` are present in the running container:
+    The `UnifiedRouter` callback calls Cloudflare Workers AI directly. Verify
+    that `CF_API_TOKEN` and `CF_ACCOUNT_ID` are present in the running container:
 
     ```bash
-    docker compose exec litellm env | grep -E 'HF_|CF_'
+    docker compose exec litellm env | grep CF_
     ```
 
     If any variable is missing, set it with

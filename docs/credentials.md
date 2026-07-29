@@ -79,7 +79,7 @@ These values must be obtained from their provider or environment:
 | Phase 1 models | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | At least one is needed for the workshop |
 | Optional Langfuse | `LANGFUSE_EE_LICENSE_KEY` | Leave blank for the OSS feature set |
 | Phase 2 | ClickHouse Cloud host, user, password; MCP URL | Use a dedicated read-only database user |
-| Phase 1 image gen | `HF_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; both absent silently disables image generation |
+| Phase 1 image gen | `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; absent silently disables image generation |
 | Phase 3 | `RUNPOD_API_KEY`, `VLLM_API_BASE`, `VLLM_API_KEY` | The vLLM base URL must end in `/v1` |
 | AWS target | `AWS_PROFILE` or a static access-key pair | Prefer IAM Identity Center / SSO |
 
@@ -130,20 +130,18 @@ These values are listed under `secrets.optional."1"` in `stack.yaml` so
 
 ## Image generation (free tier)
 
-LibreChat exposes a single image generation option (`dall-e-3`). LiteLLM routes
-requests to HuggingFace FLUX.1-schnell first and falls back to Cloudflare
-Workers AI FLUX.1-schnell automatically. Both providers offer a free tier with
-no credit card required. If both tokens are absent, image generation is silently
-disabled.
+Image generation is handled by Cloudflare Workers AI (FLUX.1-schnell), called
+directly from the `UnifiedRouter` callback. The provider offers a free tier with
+no credit card required. If the tokens are absent, image generation fails with an
+API error; the chat path is unaffected.
 
 | Variable | Where to get it |
 |---|---|
-| `HF_TOKEN` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) → "New token" → type **Read** → copy. Starts with `hf_`. |
 | `CF_API_TOKEN` | [dash.cloudflare.com](https://dash.cloudflare.com/) → "My Profile" → "API Tokens" → "Create Token" → use the **Cloudflare Workers AI** template → copy. |
 | `CF_ACCOUNT_ID` | Top-right of any Cloudflare dashboard page under **Account ID**. |
 
 Enter these through the setup menu (they appear under the
-"Image generation (HuggingFace / Cloudflare)" group):
+"Image generation (Cloudflare Workers AI)" group):
 
 ```bash
 ./scripts/stack.sh secrets setup --phase 1

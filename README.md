@@ -5,7 +5,7 @@ A composable LLMOps reference stack built around a single gateway:
 - **LiteLLM** for model routing and cost tracking
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
-- **OpenAI and Anthropic** for chat, **Cloudflare / HuggingFace** for image generation, and **MinIO** for image storage in the current Phase 1 stack
+- **OpenAI and Anthropic** for chat, **Cloudflare Workers AI** for image generation, and **MinIO** for image storage in the current Phase 1 stack
 - **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
 
 The phases are a build order rather than a menu. The destination is an agent
@@ -32,7 +32,7 @@ names, and deployment targets.
 |---|---|
 | Phase 1 Docker stack | Runnable |
 | OpenAI / Anthropic requests through LiteLLM | Requires at least one provider key |
-| Image generation (Cloudflare FLUX.1-schnell → HuggingFace fallback) | Runnable; free-tier tokens optional |
+| Image generation (Cloudflare Workers AI FLUX.1-schnell) | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | Runnable |
 | AWS EC2 target | Runnable |
 | Phases 2–5 | Not built yet |
@@ -88,7 +88,6 @@ LiteLLM Gateway ──────────── traces ──────�
         ├─ auto · English text  ──▶ gpt-4o        Redis · MinIO
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
-        │                fallback ─▶ HuggingFace FLUX.1-schnell
         │                  stores ─▶ MinIO → media.<domain>
         ├─▶ MCP tools                   phase 2
         └─▶ vLLM on RunPod              phase 3
@@ -99,7 +98,7 @@ LiteLLM Gateway ──────────── traces ──────�
 
 Phase 1 runs today. One model alias (`auto`) in the chat UI routes to the right
 provider: English text → gpt-4o, Korean → claude-sonnet, image-intent messages
-→ Cloudflare FLUX.1-schnell (with HuggingFace as fallback) — all via a single
+→ Cloudflare Workers AI FLUX.1-schnell — all via a single
 `UnifiedRouter` callback, all emitting traces to Langfuse.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model

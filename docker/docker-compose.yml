@@ -342,9 +342,7 @@ services:
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LITELLM_LANGFUSE_HOST:-http://langfuse-web:3000}
 
-      # Image generation — free-tier providers (both optional; HF is primary,
-      # Cloudflare is the fallback). Leave blank to disable image generation.
-      HF_TOKEN: ${HF_TOKEN:-}
+      # Image generation — Cloudflare Workers AI (optional; leave blank to disable).
       CF_API_TOKEN: ${CF_API_TOKEN:-}
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
 

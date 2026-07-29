@@ -221,16 +221,13 @@ flowchart TD
     LF["Langfuse"]
     GPT["gpt-4o\n(OpenAI)"]
     CS["claude-sonnet\n(Anthropic)"]
-    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
-    HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell"]
     MN["MinIO\n(media.<domain>)"]
 
     LC -- "chat · model=auto" --> G
 
     G -- "image keywords detected" --> CF
-    CF -. "error" .-> HF
     CF -- "store" --> MN
-    HF -- "store" --> MN
     G -- "English (Latin script)" --> GPT
     G -- "Korean / non-Latin" --> CS
 
@@ -292,22 +289,19 @@ Image generation is triggered directly from chat — type an image-intent messag
 flowchart LR
     LC["LibreChat\nchat (auto)"]
     CB["UnifiedRouter\npre_call_hook"]
-    CF["Cloudflare Workers AI\nFLUX.1-schnell\n(primary)"]
-    HF["HuggingFace\nFLUX.1-schnell\n(fallback)"]
+    CF["Cloudflare Workers AI\nFLUX.1-schnell"]
     MN["MinIO\n(media.<domain>)"]
     LF["Langfuse trace"]
 
     LC -- "image keywords\nin message" --> CB
     CB -- "asyncio.Task" --> CF
-    CF -. "error" .-> HF
     CF -- "store image" --> MN
-    HF -- "store image" --> MN
     CB -- "1-token LLM call\n(placeholder)" --> LC
     CB -- "streaming_hook:\nreplace with\n![img](media URL)" --> LC
     CB -- "trace" --> LF
 ```
 
-The callback calls the provider APIs directly (LiteLLM's built-in HuggingFace / Cloudflare image generation does not function correctly). Cloudflare Workers AI is the primary provider; HuggingFace is a secondary fallback (unreachable from some networks). The generated image is stored in MinIO and served via the `media.<domain>` subdomain. The `async_post_call_streaming_iterator_hook` drains the 1-token LLM stream and replaces it with a streaming SSE chunk containing the markdown image link. LibreChat renders the image inline.
+The callback calls Cloudflare Workers AI directly via `httpx` (LiteLLM's built-in image generation endpoint does not correctly support Cloudflare). The generated image is stored in MinIO and served via the `media.<domain>` subdomain. The `async_post_call_streaming_iterator_hook` drains the 1-token LLM stream and replaces it with a streaming SSE chunk containing the markdown image link. LibreChat renders the image inline.
 
 Image generation is enabled by default when the credentials are present.
 The relevant `stack.yaml` block:
@@ -319,16 +313,13 @@ layers:
       image_generation:
         enabled: true
         providers:
-          huggingface:
-            model: black-forest-labs/FLUX.1-schnell
-            api_key_env: HF_TOKEN
           cloudflare:
             model: "@cf/black-forest-labs/flux-1-schnell"
             api_key_env: CF_API_TOKEN
             account_id_env: CF_ACCOUNT_ID
 ```
 
-The credentials (`HF_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`) are optional.
+The credentials (`CF_API_TOKEN`, `CF_ACCOUNT_ID`) are optional.
 If absent, image generation fails with an API error; the chat path is unaffected.
 To disable cleanly, set `image_generation.enabled: false` and re-render.
 

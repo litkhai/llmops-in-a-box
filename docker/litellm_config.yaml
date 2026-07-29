@@ -33,13 +33,6 @@ model_list:
       mode: chat
   - model_name: dall-e-3
     litellm_params:
-      model: huggingface/black-forest-labs/FLUX.1-schnell
-      api_key: os.environ/HF_TOKEN
-      timeout: 90
-    model_info:
-      mode: image_generation
-  - model_name: dall-e-3-cf
-    litellm_params:
       model: cloudflare/@cf/black-forest-labs/flux-1-schnell
       api_key: os.environ/CF_API_TOKEN
       cf_account_id: os.environ/CF_ACCOUNT_ID
@@ -63,7 +56,6 @@ router_settings:
     - { "gpt-4o": [claude-sonnet] }
     - { "claude-sonnet": [gpt-4o] }
     - { "auto": [claude-sonnet] }
-    - { "dall-e-3": [dall-e-3-cf] }
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
