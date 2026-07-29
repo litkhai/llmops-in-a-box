@@ -15,7 +15,7 @@ declarative stack definition.
 </p>
 
 <p class="hero-stack">
-LiteLLM · LibreChat · Langfuse · ClickHouse · OpenAI · Anthropic
+LiteLLM · LibreChat · Langfuse · ClickHouse · OpenAI · Anthropic · Cloudflare · MinIO
 </p>
 
 [Get started](getting-started.md){ .md-button .md-button--primary }
@@ -127,6 +127,8 @@ flowchart TB
 
     OA["OpenAI API"]
     AN["Anthropic API"]
+    CF["Cloudflare Workers AI<br/><small>FLUX.1-schnell</small>"]
+    IMGMI[("MinIO<br/><small>generated images<br/>media.&lt;domain&gt;</small>")]
     MCP["MCP servers<br/><small>ClickHouse Cloud</small>"]
     VL["vLLM :8000<br/><small>Qwen2.5-7B on RunPod</small>"]
 
@@ -142,6 +144,8 @@ flowchart TB
 
     GW -->|Phase 1| OA
     GW -->|Phase 1| AN
+    GW -->|"Phase 1 (images)"| CF
+    CF --> IMGMI
     GW -->|Phase 2| MCP
     GW -->|Phase 3| VL
     VL -.->|Phase 4| ST
@@ -157,7 +161,7 @@ flowchart TB
     classDef p3 fill:#bf8700,stroke:#bf8700,color:#fff
     classDef p4 fill:#2563c9,stroke:#2563c9,color:#fff
     classDef obs fill:#0969da,stroke:#0969da,color:#fff
-    class OA,AN p1
+    class OA,AN,CF,IMGMI p1
     class MCP p2
     class VL p3
     class ST p4
@@ -165,8 +169,10 @@ flowchart TB
 ```
 
 The two MinIO instances are deliberate. Langfuse runs one for its own blobs;
-AIStor is a separate store you own, so your dataset and artifact lifecycle is
-not coupled to another product's schema and retention.
+the image-hosting MinIO is a separate bucket served via `media.<domain>` so
+generated images are accessible over HTTPS without coupling to Langfuse's
+internal storage. AIStor (Phase 4) adds a third store for dataset and artifact
+lifecycle that you own end to end.
 
 ### The layers
 
@@ -176,6 +182,7 @@ not coupled to another product's schema and retention.
 | Observability | Langfuse (ClickHouse · Postgres · Redis · MinIO) | <span class="phase phase-1">1</span> |
 | Gateway | LiteLLM — routing, virtual keys, cost tracking | <span class="phase phase-1">1</span> |
 | Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
+| Image generation | Cloudflare Workers AI (FLUX.1-schnell) → MinIO (`media.<domain>`) | <span class="phase phase-1">1</span> |
 | Tools | MCP servers (ClickHouse Cloud first) | <span class="phase phase-2">2</span> |
 | Serving | vLLM | <span class="phase phase-3">3</span> |
 | Models | Self-hosted — Qwen, EXAONE, EEVE | <span class="phase phase-3">3</span> |
@@ -192,14 +199,21 @@ without rewriting the ones already there.
 
 1. A user sends a message in LibreChat (or any OpenAI-compatible client) and
    picks a model — `gpt-4o`, `claude-sonnet`, or from Phase 3, `qwen-7b`.
+   Selecting `auto` activates language-aware routing at the gateway.
 2. LiteLLM receives it on **one unified endpoint**, resolves the model alias,
    and routes it to the right provider. Anthropic's format translation is
    handled for you.
-3. The response streams back.
-4. LiteLLM's success and failure callbacks push the full trace — prompt,
-   completion, latency, token counts, computed cost — into **Langfuse**, where
-   ClickHouse stores and serves high-volume trace analytics.
-5. In Langfuse you compare models side by side, build datasets from production
+3. If the message contains image-generation intent (e.g. "draw", "그려줘"),
+   a pre-call hook intercepts the request, fires off image generation to
+   **Cloudflare Workers AI** (FLUX.1-schnell) in the background, and streams
+   back the finished image as a markdown tag once it's uploaded to **MinIO**
+   (`media.<domain>`). The chat UI renders it inline — no separate DALL-E UI
+   needed.
+4. For plain chat requests, the response streams back from the chosen provider.
+5. LiteLLM's callbacks push the full trace — prompt, completion, latency,
+   token counts, computed cost — into **Langfuse**, where ClickHouse stores
+   and serves high-volume trace analytics.
+6. In Langfuse you compare models side by side, build datasets from production
    traces, and score outputs.
 
 !!! tip "Zero application code changes"
@@ -219,22 +233,26 @@ flowchart LR
     G["LiteLLM Gateway"]
     O["OpenAI"]
     A["Anthropic"]
+    CF["Cloudflare Workers AI"]
+    IMGMI[("MinIO (images)")]
     L["Langfuse"]
     D["ClickHouse · Postgres<br/>Redis · MinIO"]
 
     C --> G
     G --> O
     G --> A
+    G --"image callback"--> CF --> IMGMI
     G -. traces .-> L
     L --- D
 ```
 
-- LiteLLM provides one OpenAI-compatible gateway.
+- LiteLLM provides one OpenAI-compatible gateway with language-aware routing.
 - LibreChat provides the model picker and chat UI.
 - OpenAI and Anthropic provide model inference.
+- Cloudflare Workers AI (FLUX.1-schnell) generates images on demand; results
+  are uploaded to MinIO and served via `media.<domain>`.
 - Langfuse records traces, tokens, latency, cost, and failures.
-- ClickHouse, Postgres, Redis, MinIO, and MongoDB support the application
-  services.
+- ClickHouse, Postgres, Redis, and MinIO support the application services.
 
 !!! warning "Phase 1 is not an air-gapped deployment"
     At least one external model-provider key is required, and every model
