@@ -350,6 +350,26 @@ render_litellm() {
       printf '%s' "$fb_lines"
     fi
 
+    # ── MCP servers (Phase 2 tools layer) ────────────────────────────────────
+    # Connecting MCP to LiteLLM (not LibreChat) means every client using the
+    # gateway can call tools, and every tool call is traced in Langfuse.
+    if resolved_layers | grep -qx tools; then
+      local has_mcp=0 srv_name srv_enabled transport
+      while IFS= read -r srv_name; do
+        [ -n "$srv_name" ] || continue
+        srv_enabled="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .enabled")"
+        [ "$srv_enabled" = "true" ] || continue
+        if [ "$has_mcp" -eq 0 ]; then
+          printf '\nmcp_servers:\n'
+          has_mcp=1
+        fi
+        transport="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .transport")"
+        printf '  - server_name: "%s"\n' "$srv_name"
+        printf '    server_path_or_url: "http://mcp-%s:9100/sse"\n' "$srv_name"
+        printf '    transport: "%s"\n' "$transport"
+      done < <(q '.layers.tools.options.servers[].name')
+    fi
+
     printf '\ngeneral_settings:\n'
     printf '  master_key: os.environ/%s\n' "$(qs '.layers.gateway.options.master_key_env')"
   } > "$out"
@@ -410,30 +430,6 @@ render_librechat() {
       printf '#   %-14s %s — %s\n' "$a" "$label" "$desc"
     done < <(resolved_models)
 
-    # ── MCP servers (Phase 2 tools layer) ────────────────────────────────────
-    local has_mcp=0
-    if resolved_layers | grep -qx tools; then
-      local srv_name srv_enabled transport
-      while IFS= read -r srv_name; do
-        [ -n "$srv_name" ] || continue
-        srv_enabled="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .enabled")"
-        [ "$srv_enabled" = "true" ] || continue
-        transport="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .transport")"
-        if [ "$has_mcp" -eq 0 ]; then
-          printf '\nmcpServers:\n'
-          has_mcp=1
-        fi
-        printf '  %s:\n' "$srv_name"
-        case "$transport" in
-          sse)
-            printf '    type: sse\n'
-            printf '    url: "http://mcp-%s:9100/sse"\n' "$srv_name"
-            printf '    timeout: 60000\n'
-            printf '    initTimeout: 30000\n'
-            ;;
-        esac
-      done < <(q '.layers.tools.options.servers[].name')
-    fi
   } > "$out"
 
   ok "rendered $(printf '%s' "${out#"$REPO_ROOT/"}")"
