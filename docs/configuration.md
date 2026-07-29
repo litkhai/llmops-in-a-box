@@ -333,6 +333,83 @@ for token acquisition steps.
 
 ---
 
+## MCP tool layer (Phase 2)
+
+MCP tools are wired at the **gateway** layer, not at the client. Every
+application that reaches LiteLLM gains the same tool access automatically —
+no per-client configuration required.
+
+```mermaid
+flowchart LR
+    LC["LibreChat / apps"]
+    GW["LiteLLM Gateway\n:4000"]
+    MCP["mcp-clickhouse\n:9100 (internal)"]
+    CH["ClickHouse Cloud"]
+
+    LC --> GW
+    GW -- "MCP / SSE" --> MCP
+    MCP -- "SQL (CLICKHOUSE_SECURE=true)" --> CH
+    GW -. "tool call traces" .-> LF["Langfuse"]
+```
+
+The `mcp-clickhouse` container exposes an SSE endpoint on port 9100. That port
+is **internal to the Docker network only** — no security group change is
+needed for the aws-ec2 target.
+
+### stack.yaml — tools layer
+
+```yaml
+layers:
+  tools:
+    phase: 2
+    enabled: true
+    impl: mcp
+    managed_by: compose
+    compose_profile: tools
+    servers:
+      clickhouse:
+        enabled: true
+        image: mcp-clickhouse
+        port: 9100
+        transport: sse
+```
+
+Enable this layer for `--profile phase-2`:
+
+```yaml
+profiles:
+  phase-2:
+    layers: [gateway, observability, ui, tools]
+```
+
+### Generated litellm_config.yaml
+
+`render --profile phase-2` appends the `mcp_servers` block to the generated
+`docker/litellm_config.yaml`:
+
+```yaml
+mcp_servers:
+  - server_name: "clickhouse"
+    server_path_or_url: "http://mcp-clickhouse:9100/sse"
+    transport: "sse"
+```
+
+### Deploying Phase 2
+
+```bash
+./scripts/stack.sh render --profile phase-2
+./scripts/stack.sh up --profile phase-2
+```
+
+Set the required credentials first (see
+[Credentials — MCP (ClickHouse Cloud)](credentials.md#mcp-clickhouse-cloud)):
+
+```bash
+./scripts/stack.sh secrets setup --phase 2
+```
+
+---
+
 ## Domain / HTTPS proxy (aws-ec2)
 
 The `aws-ec2` target includes an optional Caddy reverse proxy that provides

@@ -262,6 +262,59 @@ production service.
 Ports 80 and 443 are open to `0.0.0.0/0` for HTTPS. The remaining ports use
 `allowed_cidr` (default `0.0.0.0/0`; each service has its own authentication).
 
+## Phase 2 — MCP tool layer
+
+Phase 2 adds the `mcp-clickhouse` service and wires it into the LiteLLM
+gateway. Port 9100 is internal to the Docker network; no security group change
+is needed for the aws-ec2 target.
+
+### Prerequisites
+
+Set Phase 2 credentials before starting:
+
+```bash
+./scripts/stack.sh secrets setup --phase 2
+```
+
+For the aws-ec2 target, push them to SSM:
+
+```bash
+./scripts/stack.sh secrets push --target aws-ec2
+```
+
+### Start Phase 2
+
+```bash
+./scripts/stack.sh render --profile phase-2
+./scripts/stack.sh up --profile phase-2
+./scripts/stack.sh status
+```
+
+`render --profile phase-2` generates `docker/litellm_config.yaml` with the
+`mcp_servers` block pointing at `http://mcp-clickhouse:9100/sse`. The tools
+layer starts under the `tools` compose profile alongside the gateway,
+observability, and UI layers.
+
+### Verify the MCP endpoint
+
+```bash
+curl http://localhost:4000/mcp
+```
+
+A healthy response lists the `clickhouse` server. On the aws-ec2 target,
+use the LiteLLM HTTPS subdomain:
+
+```bash
+curl https://litellm.<domain>/mcp
+```
+
+### Published ports (Phase 2)
+
+Port 9100 (`mcp-clickhouse`) is **not** published to the host. It is
+accessible only within the Docker network by the LiteLLM container.
+
+---
+
 ## External vLLM serving
 
 Phase 3 is not built yet and is not required for the current demo. The design
@@ -373,6 +426,64 @@ gateway configuration, not the client protocol.
 
     ```bash
     ./scripts/stack.sh render
+    ```
+
+??? question "`mcp-clickhouse` container exits immediately after start"
+    **Symptom:** The `mcp-clickhouse` container stops with an error about an
+    unrecognised flag (`--transport sse not supported`).
+
+    **Cause:** The `mcp-clickhouse` package version in use may not support
+    `--transport sse` as a CLI flag. Use the `mcp-proxy` wrapper approach or
+    pin to a version that supports SSE transport.
+
+    **Fix:** Check the `docker/mcp/Dockerfile` entrypoint. If the package
+    does not support `--transport sse`, install `mcp-proxy` and wrap the
+    stdio server:
+
+    ```dockerfile
+    CMD ["mcp-proxy", "--port", "9100", "--", \
+         "python", "-m", "mcp_clickhouse"]
+    ```
+
+    Then rebuild: `docker compose build mcp-clickhouse`.
+
+??? question "LiteLLM `/mcp` endpoint returns 404"
+    **Cause:** The stack was not rendered with `--profile phase-2`, so
+    `mcp_servers` is absent from `docker/litellm_config.yaml`.
+
+    **Fix:**
+
+    ```bash
+    ./scripts/stack.sh render --profile phase-2
+    docker compose up -d --no-deps litellm
+    ```
+
+    Verify the block is present:
+
+    ```bash
+    grep -A5 mcp_servers docker/litellm_config.yaml
+    ```
+
+??? question "ClickHouse connection refused inside `mcp-clickhouse`"
+    **Symptom:** The container starts but tool calls fail with a connection
+    error. Container logs show `Connection refused` or `authentication failed`.
+
+    **Cause:** `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, or
+    `CLICKHOUSE_PASSWORD` is missing or incorrect, or `CLICKHOUSE_SECURE` is
+    not set to `true` for ClickHouse Cloud.
+
+    **Fix:** Verify the values in the running container:
+
+    ```bash
+    docker compose exec mcp-clickhouse env | grep CLICKHOUSE
+    ```
+
+    If any value is wrong, update credentials and restart:
+
+    ```bash
+    ./scripts/stack.sh secrets setup --phase 2
+    ./scripts/stack.sh secrets write
+    docker compose up -d --no-deps mcp-clickhouse
     ```
 
 ??? question "Image generation returns an error"

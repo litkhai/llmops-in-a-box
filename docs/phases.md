@@ -98,15 +98,34 @@ visible services.
 
 ## Phase 2 — MCP tool layer
 
-**Adds:** MCP tools, starting with ClickHouse Cloud.
+**Adds:** `mcp-clickhouse` service (port 9100, internal network only) with SSE
+transport, wired into the LiteLLM gateway via `mcp_servers`.
 
-The first implementation should expose a dedicated read-only ClickHouse
-credential and record tool calls beside the model calls that caused them.
+Deploy with:
+
+```bash
+./scripts/stack.sh render --profile phase-2
+./scripts/stack.sh up --profile phase-2
+```
+
+The `mcp-clickhouse` container is built from `docker/mcp/Dockerfile`
+(`python:3.12-slim` + `mcp-clickhouse` package) and connects to ClickHouse
+Cloud via `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, and
+`CLICKHOUSE_SECURE=true`. Tool access is declared at the **gateway** layer, not
+at the client: every app reaching LiteLLM inherits the same tools
+automatically.
+
+All tool calls are traced through LiteLLM → Langfuse alongside the model calls
+that triggered them.
 
 Acceptance criteria:
 
-- an agent answers a question that requires private warehouse data
-- the trace contains the tool arguments, result, latency, and failure state
+- `mcp-clickhouse` starts and the gateway reports the `clickhouse` server in
+  its MCP server list
+- an agent answers a question that requires ClickHouse data without any
+  client-side tool wiring
+- the Langfuse trace contains the tool arguments, result, latency, and failure
+  state beside the parent model call
 - a write attempt fails at the database permission boundary
 
 Prompt instructions are not access control. The MCP credential's database

@@ -165,6 +165,75 @@ Phase 1 stack.
 
 ---
 
+## MCP tool layer (Phase 2)
+
+??? failure "`mcp-clickhouse` container exits immediately — `--transport sse` not supported"
+    **Symptom:** The container stops at startup. Logs show an error about an
+    unrecognised flag or unsupported transport.
+
+    **Cause:** The installed `mcp-clickhouse` package version does not accept
+    `--transport sse` as a CLI argument.
+
+    **Fix:** Use the `mcp-proxy` wrapper in `docker/mcp/Dockerfile` to expose
+    the stdio-only server over SSE:
+
+    ```dockerfile
+    CMD ["mcp-proxy", "--port", "9100", "--", \
+         "python", "-m", "mcp_clickhouse"]
+    ```
+
+    Rebuild the image:
+
+    ```bash
+    docker compose build mcp-clickhouse
+    docker compose up -d --no-deps mcp-clickhouse
+    ```
+
+??? failure "LiteLLM `/mcp` endpoint returns 404"
+    **Symptom:** `curl http://localhost:4000/mcp` returns a 404 or empty
+    response.
+
+    **Cause:** The stack was rendered without `--profile phase-2`, so the
+    `mcp_servers` block is absent from `docker/litellm_config.yaml`.
+
+    **Fix:**
+
+    ```bash
+    ./scripts/stack.sh render --profile phase-2
+    docker compose up -d --no-deps litellm
+    ```
+
+    Confirm the block is present:
+
+    ```bash
+    grep -A5 mcp_servers docker/litellm_config.yaml
+    ```
+
+??? failure "Tool calls fail — ClickHouse connection refused or authentication error"
+    **Symptom:** The `/mcp` endpoint responds but tool calls return a
+    connection or authentication error. Container logs show `Connection refused`
+    or `Code: 516. DB::Exception: Authentication failed`.
+
+    **Cause:** `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, or `CLICKHOUSE_PASSWORD`
+    is wrong, or `CLICKHOUSE_SECURE` is not set to `true` (required for
+    ClickHouse Cloud).
+
+    **Fix:** Check the live environment variables:
+
+    ```bash
+    docker compose exec mcp-clickhouse env | grep CLICKHOUSE
+    ```
+
+    Update credentials and restart:
+
+    ```bash
+    ./scripts/stack.sh secrets setup --phase 2
+    ./scripts/stack.sh secrets write
+    docker compose up -d --no-deps mcp-clickhouse
+    ```
+
+---
+
 ## Langfuse traces
 
 ??? failure "Traces missing — \"Event type not accepted\" in ingestion response"

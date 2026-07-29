@@ -35,7 +35,8 @@ names, and deployment targets.
 | Image generation (Cloudflare Workers AI FLUX.1-schnell) | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | Runnable |
 | AWS EC2 target | Runnable |
-| Phases 2–5 | Not built yet |
+| Phase 2 — MCP tool layer (ClickHouse Cloud) | Runnable — ClickHouse Cloud via MCP |
+| Phases 3–5 | Not built yet |
 
 If Langfuse traces are missing, a `LANGFUSE_MIGRATION_V4_WRITE_MODE` incompatibility in Langfuse v4 RC builds may be the cause — see [Deployment troubleshooting](https://litkhai.github.io/llmops-in-a-box/deployment/#troubleshooting) for details.
 
@@ -89,7 +90,7 @@ LiteLLM Gateway ──────────── traces ──────�
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
         │                  stores ─▶ MinIO → media.<domain>
-        ├─▶ MCP tools                   phase 2
+        ├─▶ MCP tools (mcp-clickhouse)   phase 2
         └─▶ vLLM on RunPod              phase 3
                  │
                  └─▶ MinIO AIStor       phase 4
@@ -111,7 +112,7 @@ Adding a later layer changes gateway configuration, not client code.
 | Phase | Outcome | Status |
 |:--:|---|---|
 | 1 | Gateway, UI, and tracing over frontier APIs | In progress |
-| 2 | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
+| 2 | MCP tool layer, starting with ClickHouse Cloud | Runnable — ClickHouse Cloud via MCP |
 | 3 | vLLM self-hosted serving alongside provider APIs | Not built yet |
 | 4 | Artifact storage and KV-cache reuse | Not built yet |
 | 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |

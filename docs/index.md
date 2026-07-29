@@ -183,7 +183,7 @@ lifecycle that you own end to end.
 | Gateway | LiteLLM — routing, virtual keys, cost tracking | <span class="phase phase-1">1</span> |
 | Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
 | Image generation | Cloudflare Workers AI (FLUX.1-schnell) → MinIO (`media.<domain>`) | <span class="phase phase-1">1</span> |
-| Tools | MCP servers (ClickHouse Cloud first) | <span class="phase phase-2">2</span> |
+| Tools | MCP servers — ClickHouse Cloud, wired into LiteLLM gateway | <span class="phase phase-2">2</span> |
 | Serving | vLLM | <span class="phase phase-3">3</span> |
 | Models | Self-hosted — Qwen, EXAONE, EEVE | <span class="phase phase-3">3</span> |
 | Compute | RunPod · AWS | <span class="phase phase-3">3</span> |
@@ -269,7 +269,7 @@ flowchart LR
 | Phase | Outcome | Status |
 |:--:|---|---|
 | <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | In progress |
-| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Not built yet |
+| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Runnable — ClickHouse Cloud via MCP |
 | <span class="phase phase-3">3</span> | vLLM self-hosted serving alongside provider APIs | Not built yet |
 | <span class="phase phase-4">4</span> | Artifact storage and KV-cache reuse | Not built yet |
 | <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | Not built yet |

@@ -78,7 +78,7 @@ These values must be obtained from their provider or environment:
 |---|---|---|
 | Phase 1 models | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | At least one is needed for the workshop |
 | Optional Langfuse | `LANGFUSE_EE_LICENSE_KEY` | Leave blank for the OSS feature set |
-| Phase 2 | ClickHouse Cloud host, user, password; MCP URL | Use a dedicated read-only database user |
+| Phase 2 MCP | `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`, `CLICKHOUSE_CLOUD_PASSWORD` | ClickHouse Cloud credentials — use a dedicated read-only database user |
 | Phase 1 image gen | `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; absent silently disables image generation |
 | Phase 3 | `RUNPOD_API_KEY`, `VLLM_API_BASE`, `VLLM_API_KEY` | The vLLM base URL must end in `/v1` |
 | AWS target | `AWS_PROFILE` or a static access-key pair | Prefer IAM Identity Center / SSO |
@@ -146,6 +146,34 @@ Enter these through the setup menu (they appear under the
 ```bash
 ./scripts/stack.sh secrets setup --phase 1
 ```
+
+## MCP (ClickHouse Cloud)
+
+The `mcp-clickhouse` service connects to ClickHouse Cloud using three
+credentials. Use a **dedicated read-only user** — the MCP server's database
+grants are the only access control; prompt instructions are not.
+
+| Variable | Where to get it |
+|---|---|
+| `CLICKHOUSE_CLOUD_HOST` | ClickHouse Cloud console → your service → **Connect** → hostname (without port) |
+| `CLICKHOUSE_CLOUD_USER` | ClickHouse Cloud console → a read-only SQL user you create |
+| `CLICKHOUSE_CLOUD_PASSWORD` | Password for that user |
+
+Enter these through the setup menu:
+
+```bash
+./scripts/stack.sh secrets setup --phase 2
+```
+
+These values are pushed to SSM under the `phase-2` prefix when deploying to
+the aws-ec2 target:
+
+```bash
+./scripts/stack.sh secrets push --target aws-ec2
+```
+
+`MCP_CLICKHOUSE_URL` is derived automatically from the host and does not need
+to be set manually.
 
 ## Focused and automated use
 

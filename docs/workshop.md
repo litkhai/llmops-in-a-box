@@ -167,5 +167,80 @@ can make stored encrypted data unreadable.
     run `./scripts/stack.sh up` again so LiteLLM reloads them.
 
 Next: use the [Demo flow](demo-flow.md), change the model catalog in
-[Configuration](configuration.md), or read the
-[build-out phases](phases.md) for what comes after Phase 1.
+[Configuration](configuration.md), or continue to the Phase 2 workshop below.
+
+---
+
+# Workshop — Phase 2
+
+Phase 2 adds the `mcp-clickhouse` service and wires MCP tools into the LiteLLM
+gateway. Prerequisites: Phase 1 running; ClickHouse Cloud credentials
+configured (see [Credentials — MCP](credentials.md#mcp-clickhouse-cloud)).
+
+**Outcome:** Tool calls from any client reach ClickHouse Cloud through the
+gateway and appear as traces in Langfuse.
+
+## 1. Configure Phase 2 credentials
+
+```bash
+./scripts/stack.sh secrets setup --phase 2
+```
+
+Enter `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`, and
+`CLICKHOUSE_CLOUD_PASSWORD` when prompted. Use a read-only database user.
+
+## 2. Render and start Phase 2
+
+```bash
+./scripts/stack.sh render --profile phase-2
+./scripts/stack.sh up --profile phase-2
+./scripts/stack.sh status
+```
+
+This renders `mcp_servers` into `docker/litellm_config.yaml` and starts the
+`mcp-clickhouse` container alongside the existing Phase 1 services.
+
+## 3. Verify the tools endpoint
+
+```bash
+curl http://localhost:4000/mcp
+```
+
+The response should list the `clickhouse` server. On the aws-ec2 target:
+
+```bash
+curl https://litellm.<domain>/mcp
+```
+
+## 4. Send a tool-calling request
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:4000",
+    api_key="<LITELLM_MASTER_KEY>",
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[
+        {"role": "user", "content": "List the tables available in ClickHouse."}
+    ],
+)
+print(response.choices[0].message.content)
+```
+
+**Checkpoint:** open Langfuse → **Tracing**. The trace should contain both the
+model call and the tool call (arguments, result, latency). No client-side
+tool configuration was needed.
+
+## 5. Troubleshooting Phase 2
+
+??? failure "`/mcp` returns 404"
+    Render with `--profile phase-2` and restart LiteLLM. See
+    [Deployment troubleshooting](deployment.md#troubleshooting) for details.
+
+??? failure "`mcp-clickhouse` container is not healthy"
+    Check credentials and transport support. See
+    [Deployment troubleshooting](deployment.md#troubleshooting) for details.
