@@ -312,6 +312,11 @@ layers:
     options:
       image_generation:
         enabled: true
+        # dalle_alias is the model name LibreChat requests for image generation.
+        # The UnifiedRouter callback intercepts chat requests with this alias
+        # and routes them to Cloudflare — it does NOT call OpenAI DALL-E.
+        dalle_alias: dall-e-3
+        timeout: 90
         providers:
           cloudflare:
             model: "@cf/black-forest-labs/flux-1-schnell"

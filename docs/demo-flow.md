@@ -41,7 +41,7 @@ Lead with the architecture, not the UI.
 ```
 
 - Models are declared once and rendered into both the gateway routing table and the UI picker. No drift between what the UI offers and what the gateway can serve.
-- The UI shows one model: `auto`. Two chat providers and two image providers are wired in behind it — the user never sees a model switch.
+- The UI shows one model: `auto`. Two chat providers (OpenAI, Anthropic) and one image provider (Cloudflare Workers AI) are wired in behind it — the user never sees a model switch.
 
 ---
 
