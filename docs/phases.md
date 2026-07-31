@@ -64,8 +64,8 @@ are cumulative.
 |:--:|---|---|
 | 1 | Frontier models through LiteLLM, traced in Langfuse | **Runnable — Docker and AWS EC2** |
 | 2 | MCP tool layer | **Runnable — ClickHouse Cloud via MCP** |
-| 3 | Self-hosted vLLM serving | Not built yet |
-| 4 | Artifact storage and KV-cache reuse | Not built yet |
+| 3 | GPU serving on RunPod | Not built yet |
+| 4 | CPU serving and MinIO KV cache | Not built yet |
 | 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The AWS and Kubernetes deployment artifacts are not implemented either. A
@@ -131,12 +131,15 @@ Acceptance criteria:
 Prompt instructions are not access control. The MCP credential's database
 grants determine what the agent can do.
 
-## Phase 3 — Self-hosted serving
+## Phase 3 — GPU serving on RunPod
 
-**Adds:** vLLM and `qwen-7b`, initially on a RunPod GPU endpoint.
+**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint.
 
 The serving layer is externally managed rather than a Compose container.
-LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`.
+LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The
+GPU pod is provisioned in the RunPod console; nothing in this repository
+changes. KV-cache stays pod-local (CPU RAM + NVMe on the pod) — do not
+route it to the EC2 instance's MinIO over the internet.
 
 Acceptance criteria:
 
@@ -149,36 +152,58 @@ Acceptance criteria:
 prune that fallback in `airgapped`; a stopped local model should fail rather
 than silently egress.
 
-## Phase 4 — Storage and large context
+## Phase 4 — CPU serving and MinIO KV cache
 
-**Adds:** a separate MinIO AIStor artifact store and LMCache-based KV-cache
-reuse.
+**Adds:** `qwen-0.5b` served by llama.cpp on the EC2 instance's CPU, MinIO
+AIStor for artifacts, and LMCache writing KV blocks to MinIO S3.
+
+Phase 3 (RunPod GPU) and Phase 4 (EC2 CPU) are independent paths through the
+same gateway and observability pipeline. Phase 4 does not require a GPU pod.
+Both paths appear in one Langfuse project alongside the commercial APIs.
+
+### Phase 4a — CPU inference (llama.cpp)
+
+`llama.cpp` runs as a compose service on the EC2 instance, exposing an
+OpenAI-compatible endpoint on port 8080 (Docker network only). The model is
+Qwen2.5-0.5B-Instruct (Q4\_K\_M GGUF, ~0.4 GiB), small enough to leave
+headroom for the rest of the stack on a `t3.xlarge`. Larger quantized models
+(1.5B, 3B) work on a larger instance type.
+
+Acceptance criteria:
+
+- `qwen-0.5b` responds through the LiteLLM gateway alongside `gpt-4o` and
+  `claude-sonnet`
+- GPU pod (Phase 3) not required for Phase 4 to be functional
+- CPU model appears in Langfuse traces with zero marginal cost
+
+### Phase 4b — MinIO KV cache
+
+LMCache runs in-process with llama.cpp and offloads transformer KV blocks to
+the `kvcache` bucket in the Phase 4 MinIO AIStor instance. Because the serving
+and object store are co-located on the same EC2 instance, there is no network
+penalty for fetching cached blocks.
 
 The artifact store is separate from the MinIO instance internal to Langfuse:
 
 | Langfuse MinIO | Phase 4 store |
 |---|---|
 | Owned by Langfuse | Owned by the stack operator |
-| Trace and media internals | Datasets, eval artifacts, model weights |
+| Trace and media internals | Datasets, eval artifacts, model weights, KV cache |
 | Lifecycle follows Langfuse | Independent retention and backup policy |
 
-### Phase 4a — KV-cache reuse
+Acceptance criteria:
 
-vLLM prefix caching and LMCache avoid recomputing a shared prompt prefix. The
-cache should stay near the GPU:
+- a warm-start request for a repeated prompt prefix shows lower TTFT than a
+  cold start
+- KV-cache bucket usage is visible in the MinIO console
+- the Phase 3 GPU path is unaffected (its cache remains pod-local)
 
-- RunPod serving → pod-local RAM or NVMe
-- local NVIDIA host → a local backend, potentially the Phase 4 object store
-
-A remote pod should not fetch KV blocks from a laptop through a tunnel; latency
-and prompt-derived data exposure defeat the purpose.
-
-### Phase 4b — KV-cache offload at fleet scale
-
-MinIO MemKV is tracked as a partnership/research path, not an installable phase
-artifact. It is distinct from AIStor and from semantic response caching.
-Availability, hardware requirements, and licensing must be confirmed before it
-can become a build target.
+!!! note "MinIO MemKV — fleet-scale KV offload"
+    MinIO MemKV (flash-backed, RDMA, petascale) is architecturally the next
+    step after Phase 4b, but requires NVIDIA STX hardware with no current GA
+    availability. It is kept as a declared layer (`layers.memory` in
+    `stack.yaml`) so the architecture has an honest answer at fleet scale, but
+    it is not scheduled and is not in any profile.
 
 ## Phase 5 — Operating recipes
 
@@ -304,8 +329,8 @@ Acceptance criteria:
 |---|---|---|
 | `phase-1` | gateway, observability, UI | `gpt-4o`, `claude-sonnet` |
 | `phase-2` | Phase 1 + tools | frontier models |
-| `phase-3` | Phase 2 + serving | frontier models + `qwen-7b` |
-| `phase-4` | Phase 3 + storage and KV cache | all |
+| `phase-3` | Phase 2 + GPU serving (RunPod) | frontier models + `qwen-7b` |
+| `phase-4` | Phase 3 + CPU serving + storage + KV cache | all |
 | `phase-5` | Same infrastructure as Phase 4 | all |
 | `headless` | gateway and observability | enabled models |
 | `airgapped` | gateway, observability, UI, serving | `qwen-7b` only |

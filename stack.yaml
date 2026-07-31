@@ -55,7 +55,7 @@ phases:
     adds_layers: [tools]
     adds_models: []
   3:
-    name: Self-hosted serving
+    name: GPU serving on RunPod
     status: not_built
     scope: >-
       vLLM on a RunPod GPU pod behind the same gateway, so self-hosted and
@@ -63,21 +63,17 @@ phases:
     adds_layers: [serving]
     adds_models: [qwen-7b]
   4:
-    name: Storage and large context
+    name: CPU serving and MinIO KV cache
     status: not_built
     scope: >-
-      A MinIO AIStor instance for datasets, eval artifacts and model weights,
-      separate from the blob store Langfuse runs for its own event uploads.
-      AIStor Free covers a single node with no capacity limit, so the object
-      store carries no licence cost. Also adds KV-cache reuse, so a long shared
-      prompt prefix is prefilled once instead of per request.
-    # Was [memory] only — `storage` was missing here while profiles.phase-4,
-    # README and the docs all listed both. Fixed, and `kvcache` added: that is
-    # the buildable half of what the `memory` layer was pretending to be.
-    adds_layers: [storage, kvcache]
-    adds_models: []
-  # The `memory` layer is deliberately NOT in any phase yet. See the layer
-  # definition below for why MemKV cannot be a container in this stack.
+      llama.cpp serving a quantized model on the EC2 instance's own CPUs — no
+      GPU pod required — alongside MinIO AIStor for datasets and model weights,
+      and LMCache writing the transformer KV cache to MinIO S3. Closes the loop
+      for environments without a GPU budget, and pairs with Phase 3 when a GPU
+      is available. Phase 3 (RunPod) and Phase 4 (CPU) are independent paths
+      through the same gateway and observability pipeline.
+    adds_layers: [cpu, storage, kvcache]
+    adds_models: [qwen-0.5b]
   5:
     name: Operating recipes
     status: not_built
@@ -85,7 +81,7 @@ phases:
       No new layers. Context-based routing in LiteLLM, LibreChat Agents over
       the Phase 2 MCP tools, Langfuse evaluations, gateway guardrails, and
       finally judge-scored routing — aggregate judge scores feeding back into
-      where requests go. That loop is the destination Phases 1-4 exist to make
+      where requests go. That loop is the destination Phases 1-5 exist to make
       possible: it needs one point that both measures a request and decides
       its route.
     adds_layers: []
@@ -124,36 +120,32 @@ profiles:
     layers: [gateway, observability, ui, tools]
     models: [gpt-4o, claude-sonnet]
 
-  # ── Phase 3 — add self-hosted vLLM on RunPod alongside the APIs. ──
+  # ── Phase 3 — add self-hosted GPU serving (RunPod) alongside the APIs. ──
   phase-3:
-    description: "Phase 3 — Phase 2 plus self-hosted vLLM on RunPod"
+    description: "Phase 3 — Phase 2 plus GPU serving on RunPod"
     layers: [gateway, observability, ui, tools, serving]
 
-  # ── Phase 4 — add the MinIO AIStor artifact store. ──
-  #    `memory` is intentionally absent: MemKV needs NVIDIA STX hardware and
-  #    cannot come up here. See layers.memory.
+  # ── Phase 4 — add CPU serving (llama.cpp) and MinIO KV cache. ──
+  #    Cumulative over Phase 3: `serving` (RunPod) is included but optional —
+  #    the resolver skips it if VLLM_API_BASE is unset. `cpu` works standalone.
   phase-4:
-    description: "Phase 4 — Phase 3 plus the artifact store and KV-cache reuse"
-    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
+    description: "Phase 4 — Phase 3 plus CPU serving and MinIO KV cache"
+    layers: [gateway, observability, ui, tools, serving, cpu, storage, kvcache]
 
   # ── Phase 5 — operating recipes. Same layers as Phase 4 by design: these
   #    are things to *do* with the stack, not things to add to it. ──
   phase-5:
     description: "Phase 5 — Phase 4 plus operating recipes (no new layers)"
-    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
+    layers: [gateway, observability, ui, tools, serving, cpu, storage, kvcache]
 
   # ── Convenience aliases, independent of phase ──
 
-  # Everything currently implemented, whatever phase that is. `tools` and
-  # `storage` are listed because they are intended and simply not built yet —
-  # the resolver skips them with a warning while `enabled: false`.
-  #
-  # `memory` is deliberately NOT listed. It is not "not built yet", it is not
-  # part of this stack at all: MemKV needs NVIDIA STX-class hardware. Leaving
-  # it here contradicted the docs, which say it belongs to no phase or profile.
+  # Everything currently implemented, whatever phase that is.
+  # `memory` is deliberately NOT listed — not "not built yet", blocked on
+  # NVIDIA STX hardware with no GA date. See layers.memory.
   full:
     description: Every layer whose `enabled` is true
-    layers: [gateway, observability, ui, tools, serving, storage, kvcache]
+    layers: [gateway, observability, ui, tools, serving, cpu, storage, kvcache]
 
   # Gateway + traces, no chat UI. For SDK / script-driven demos.
   headless:
@@ -181,37 +173,36 @@ targets:
     # leaving to prose, because the reason it holds is not obvious: `serving`
     # was never a compose service (managed_by: runpod), so the GPU is reached
     # over HTTPS exactly like a commercial API, and the laptop needs no GPU of
-    # its own. Phase 4's `kvcache` then selects a pod-local backend instead of
-    # the local object store, which is the one thing that would not have
-    # worked. See layers.kvcache.
+    # its own. Phase 4 adds CPU serving locally, and that path's kvcache uses
+    # the local object store — so this target supports it natively.
     supported_phases: [1, 2, 3, 4, 5]
     notes:
       3: >-
-        Requires VLLM_API_BASE to point at a running pod. That is a pod
+        Requires VLLM_API_BASE to point at a running RunPod pod. That is a pod
         requirement, not a target one — aws-ec2 needs it just the same.
       4: >-
-        The artifact store runs locally on 9011/9012. KV-cache offload uses the
-        pod's own CPU RAM and NVMe, not this object store, because a pod cannot
-        reach a laptop behind NAT — and tunnelling it would be slower than no
-        cache at all.
+        CPU serving (llama.cpp) runs on the laptop itself. KV-cache offload for
+        the CPU path uses the local MinIO S3 bucket — no tunnel required. The
+        RunPod GPU path (Phase 3) keeps its KV cache pod-local; do not point it
+        at this object store over NAT.
 
   aws-ec2:
     kind: terraform
     description: Single EC2 instance bootstrapped with the same compose stack
     dir: terraform
     host: null                  # resolved from the `public_ip` terraform output
-    # Same five phases as `docker`, and for the same reason — it runs the same
-    # compose stack, so the phase support is a property of the stack rather
-    # than of the host. Phase 4's cache backend still follows where vLLM runs:
-    # a remote pod keeps its cache pod-local regardless of what is deployed
-    # here. See layers.kvcache.
+    # Same five phases as `docker`. Phase 3's KV cache stays pod-local (RunPod
+    # cannot reach this host over the public internet without latency defeating
+    # the point). Phase 4's CPU serving runs on this instance, so its KV cache
+    # uses the local MinIO S3 bucket natively. See layers.kvcache.
     supported_phases: [1, 2, 3, 4, 5]
     notes:
+      3: >-
+        Requires VLLM_API_BASE pointing at a live RunPod pod. KV cache stays
+        pod-local — do not route it to this instance's MinIO over the internet.
       4: >-
-        A publicly addressable host means the object store *could* serve as the
-        cache backend for a remote pod. Do not — see layers.kvcache for why the
-        latency makes that worse than no cache. Keep the backend pod-local
-        unless vLLM runs on this host.
+        CPU serving (llama.cpp) runs on the EC2 instance. KV-cache offload uses
+        the instance's own MinIO bucket — no external connection required.
     vars:
       instance_type: t3.xlarge
       volume_size_gb: 100
@@ -435,78 +426,90 @@ layers:
       # vLLM runs locally. One container, two jobs.
       buckets: [datasets, artifacts, weights, kvcache]
 
-  # ── Phase 4 — KV-cache reuse. Buildable today, unlike `memory` below. ──
+  # ── Phase 4 — KV-cache reuse via LMCache. ──
   #
-  #  Not a container. LMCache runs in-process with vLLM, so this layer's
-  #  lifecycle follows the serving layer's — hence managed_by `follows-serving`
-  #  rather than compose or runpod. The script treats anything that is not
-  #  `compose` as externally managed, which is the correct handling here, and
-  #  the same declaration stays true whether vLLM is on a RunPod pod or in a
-  #  local compose service.
+  #  Not a container. LMCache runs in-process with the inference engine, so
+  #  this layer's lifecycle follows whichever serving layer is active.
   #
-  #  The backend is a per-target decision, and that is what lets every phase
-  #  work on every target:
+  #  Backend is decided per serving path:
   #
-  #    serving remote (runpod)  → pod-local : CPU RAM + NVMe on the GPU pod
-  #    serving local  (compose) → s3        : the `storage` layer above
+  #    Phase 3 — GPU serving (RunPod, remote) → pod-local
+  #      CPU RAM + NVMe on the GPU pod. Do NOT point a remote pod at a
+  #      laptop's or EC2 instance's object store: 2-16 MB KV blocks over a
+  #      residential uplink or internet hop are slower than recomputing prefill.
+  #      Blocks are also derived from prompts — routing them through a tunnel
+  #      contradicts the sovereignty argument.
   #
-  #  Do NOT point a remote pod at a laptop's object store, tunnel or otherwise.
-  #  Either reason alone is sufficient:
-  #    • KV-cache offload only pays when fetching a block beats recomputing
-  #      prefill. 2-16 MB blocks over a residential uplink do not, so it would
-  #      be slower than having no cache — a worse demo, not a better one.
-  #    • The blocks are derived from prompts. Routing them through a
-  #      third-party tunnel contradicts the sovereignty argument this stack
-  #      exists to make.
+  #    Phase 4 — CPU serving (llama.cpp, local compose) → s3
+  #      The `storage` layer's MinIO S3 bucket (`kvcache`). Local, so no
+  #      network penalty. This is the primary KV-cache path for Phase 4.
   kvcache:
     phase: 4
     enabled: false
     impl: lmcache
     managed_by: follows-serving
     compose_profile: null
-    requires: [serving]
+    requires: []                # follows whichever of `serving` or `cpu` is active
     options:
       # vLLM's built-in prefix caching is the first step and is useful alone,
       # in GPU memory, with no backend at all.
       prefix_caching: true
       backend_by_serving:
-        runpod: pod-local
-        compose: s3
+        runpod: pod-local       # Phase 3: GPU pod, KV blocks stay on pod
+        compose: s3             # Phase 4: CPU serving in compose, MinIO S3
+      s3_bucket: kvcache
+
+  # ── Phase 4 — CPU-based local inference via llama.cpp. ──
+  #
+  #  llama.cpp server runs as a compose service on the EC2 instance's own CPUs.
+  #  Exposes an OpenAI-compatible endpoint on port 8080 (Docker network only).
+  #  No GPU pod required — runs on the instance's 4 vCPUs and 16 GiB RAM.
+  #
+  #  Model: Qwen2.5-0.5B-Instruct (Q4_K_M GGUF, ~0.4 GiB). Small enough to
+  #  leave headroom for the rest of the stack. Larger models (1.5B, 3B) work
+  #  if the instance type is upgraded.
+  #
+  #  KV-cache offload: LMCache running in-process with llama.cpp writes
+  #  transformer KV blocks to the `storage` layer's MinIO S3 `kvcache` bucket.
+  #  This is the `compose: s3` path in kvcache.options.backend_by_serving.
+  cpu:
+    phase: 4
+    enabled: false
+    impl: llama-cpp
+    managed_by: compose
+    compose_profile: cpu
+    port: 8080
+    requires: [gateway, storage]
+    options:
+      model: Qwen/Qwen2.5-0.5B-Instruct
+      quantization: Q4_K_M
+      context_window: 32768
+      n_threads: 4              # t3.xlarge has 4 vCPUs
+      n_gpu_layers: 0           # CPU only — no GPU offload
+      kvcache_backend: s3       # LMCache → MinIO (storage layer, kvcache bucket)
       s3_bucket: kvcache
 
   # ── NOT IN ANY PHASE — blocked on hardware. Read before enabling. ──
   #
-  #  This layer was written as "MemKV semantic cache". That conflates two
-  #  different mechanisms, and MemKV is not the one described by the options
-  #  below.
+  #  MinIO MemKV is a purpose-built context memory store for AI inference — a
+  #  petascale, flash-backed pool for the transformer KV cache. It moves
+  #  attention key/value blocks from GPU memory to NVMe over RDMA in 2-16 MB
+  #  blocks, bypassing file system and object protocols. Targets TTFT and TPOT
+  #  at fleet scale.
   #
-  #  What MemKV actually is (min.io/product/memkv): a purpose-built context
-  #  memory store for AI inference — a petascale, flash-backed pool for the
-  #  transformer KV cache. It moves attention key/value blocks from GPU memory
-  #  to NVMe over RDMA in 2-16 MB blocks, bypassing file system and object
-  #  protocols. It targets TTFT and TPOT, not response reuse.
+  #  Hardware required: NVIDIA STX-based systems, Vera CPUs, Spectrum-X 800 GbE,
+  #  PCIe Gen6. No compose service, no RunPod pod, no GA date.
+  #  Only calls to action are "Talk to a Specialist" and "Get Pricing".
   #
-  #  What it requires: a single binary on NVIDIA STX-based systems, Vera CPUs,
-  #  Spectrum-X 800 GbE, PCIe Gen6. There is no compose service that stands
-  #  this up, and a single RunPod pod cannot host it. `managed_by: compose`,
-  #  `port: 9200` and the health check in observability.checks are all
-  #  therefore wrong; they are annotated in place rather than invented anew.
+  #  The buildable KV-cache path is the `cpu` + `kvcache` + `storage` combo in
+  #  Phase 4: llama.cpp (CPU) + LMCache + MinIO S3. Different mechanism —
+  #  open-source, runs today — but the architectural principle is the same:
+  #  KV blocks written to an S3-compatible store instead of recomputed.
   #
-  #  And it cannot be evaluated at any budget: the product page states no
-  #  general availability, offers no download, trial or developer edition,
-  #  and gives no ship date — for MemKV or for the NVIDIA hardware it needs.
-  #  The only calls to action are "Talk to a Specialist" and "Get Pricing".
-  #
-  #  DECIDED: this stays a plan. Not scheduled, in no phase, in no profile.
+  #  DECIDED: stays a plan. Not scheduled, in no phase, in no profile.
   #  Kept declared so the architecture has an honest answer for what happens
   #  to KV cache at fleet scale, and so nobody reads this layer as one
   #  `enabled: true` away from working.
-  #
-  #  If it ever becomes a priority, two buildable things — neither scheduled:
-  #    • semantic cache (different mechanism): LiteLLM does this natively
-  #      with a Redis backend, and would want its own layer, not this name
-  #    • KV-cache reuse (same mechanism, open source): vLLM's built-in
-  #      prefix caching, and LMCache for offload to CPU/disk/S3-compatible
   memory:
     phase: null                 # was 4 — see above
     enabled: false
@@ -547,8 +550,22 @@ models:
     cost_per_1k: { input: 0.0, output: 0.0 }
     rate_limit: { rpm: 60, tpm: 200000 }
     ui:
-      label: Qwen2.5 7B — self-hosted
-      description: Runs on your own GPU. No data leaves the boundary.
+      label: Qwen2.5 7B — GPU
+      description: Runs on a RunPod GPU pod. No data leaves the boundary.
+
+  - alias: qwen-0.5b
+    phase: 4
+    enabled: true
+    tier: self_hosted
+    provider: llama-cpp
+    litellm_model: openai/Qwen/Qwen2.5-0.5B-Instruct
+    api_base_env: LLAMA_CPP_API_BASE
+    context_window: 32768
+    cost_per_1k: { input: 0.0, output: 0.0 }
+    rate_limit: { rpm: 30, tpm: 100000 }
+    ui:
+      label: Qwen2.5 0.5B — CPU
+      description: Runs on EC2 CPU. No GPU required, no data leaves the boundary.
 
   - alias: gpt-4o
     phase: 1
