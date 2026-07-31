@@ -41,7 +41,7 @@ Two acceptance tests bound the arc:
 
 | Test | What it proves | Made possible by |
 |---|---|---|
-| `--profile airgapped` resolves to a working stack with no commercial model and no commercial fallback anywhere in the generated config | the boundary is real, not configured | Phase 3 |
+| `--profile airgapped` resolves to a working stack with no commercial model and no commercial fallback anywhere in the generated config | the boundary is real, not configured | Phase 3 (CPU) |
 | An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 5 |
 
 Neither passes today. The first cannot, because there is no self-hosted model to
@@ -64,8 +64,8 @@ are cumulative.
 |:--:|---|---|
 | 1 | Frontier models through LiteLLM, traced in Langfuse | **Runnable — Docker and AWS EC2** |
 | 2 | MCP tool layer | **Runnable — ClickHouse Cloud via MCP** |
-| 3 | GPU serving on RunPod | Not built yet |
-| 4 | CPU serving and MinIO KV cache | Not built yet |
+| 3 | CPU serving and MinIO KV cache | Not built yet |
+| 4 | GPU serving on RunPod | Not built yet |
 | 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The AWS and Kubernetes deployment artifacts are not implemented either. A
@@ -131,37 +131,15 @@ Acceptance criteria:
 Prompt instructions are not access control. The MCP credential's database
 grants determine what the agent can do.
 
-## Phase 3 — GPU serving on RunPod
-
-**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint.
-
-The serving layer is externally managed rather than a Compose container.
-LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The
-GPU pod is provisioned in the RunPod console; nothing in this repository
-changes. KV-cache stays pod-local (CPU RAM + NVMe on the pod) — do not
-route it to the EC2 instance's MinIO over the internet.
-
-Acceptance criteria:
-
-- `gpt-4o`, `claude-sonnet`, and `qwen-7b` use the same client protocol
-- all three appear in one Langfuse project
-- the air-gapped profile contains no commercial model or fallback
-- GPU runtime cost is reported separately from Langfuse's per-token data
-
-`qwen-7b` can fall back to `gpt-4o` in connected profiles. The renderer must
-prune that fallback in `airgapped`; a stopped local model should fail rather
-than silently egress.
-
-## Phase 4 — CPU serving and MinIO KV cache
+## Phase 3 — CPU serving and MinIO KV cache
 
 **Adds:** `qwen-0.5b` served by llama.cpp on the EC2 instance's CPU, MinIO
 AIStor for artifacts, and LMCache writing KV blocks to MinIO S3.
 
-Phase 3 (RunPod GPU) and Phase 4 (EC2 CPU) are independent paths through the
-same gateway and observability pipeline. Phase 4 does not require a GPU pod.
-Both paths appear in one Langfuse project alongside the commercial APIs.
+Runs entirely on existing EC2 infrastructure — no external GPU pod or account
+needed. Phase 3 can be built immediately after Phase 2.
 
-### Phase 4a — CPU inference (llama.cpp)
+### Phase 3a — CPU inference (llama.cpp)
 
 `llama.cpp` runs as a compose service on the EC2 instance, exposing an
 OpenAI-compatible endpoint on port 8080 (Docker network only). The model is
@@ -173,19 +151,20 @@ Acceptance criteria:
 
 - `qwen-0.5b` responds through the LiteLLM gateway alongside `gpt-4o` and
   `claude-sonnet`
-- GPU pod (Phase 3) not required for Phase 4 to be functional
+- no GPU pod required
 - CPU model appears in Langfuse traces with zero marginal cost
+- `--profile airgapped` resolves to a working stack using only `qwen-0.5b`
 
-### Phase 4b — MinIO KV cache
+### Phase 3b — MinIO KV cache
 
 LMCache runs in-process with llama.cpp and offloads transformer KV blocks to
-the `kvcache` bucket in the Phase 4 MinIO AIStor instance. Because the serving
+the `kvcache` bucket in the Phase 3 MinIO AIStor instance. Because the serving
 and object store are co-located on the same EC2 instance, there is no network
 penalty for fetching cached blocks.
 
 The artifact store is separate from the MinIO instance internal to Langfuse:
 
-| Langfuse MinIO | Phase 4 store |
+| Langfuse MinIO | Phase 3 store |
 |---|---|
 | Owned by Langfuse | Owned by the stack operator |
 | Trace and media internals | Datasets, eval artifacts, model weights, KV cache |
@@ -196,14 +175,35 @@ Acceptance criteria:
 - a warm-start request for a repeated prompt prefix shows lower TTFT than a
   cold start
 - KV-cache bucket usage is visible in the MinIO console
-- the Phase 3 GPU path is unaffected (its cache remains pod-local)
 
 !!! note "MinIO MemKV — fleet-scale KV offload"
     MinIO MemKV (flash-backed, RDMA, petascale) is architecturally the next
-    step after Phase 4b, but requires NVIDIA STX hardware with no current GA
+    step after Phase 3b, but requires NVIDIA STX hardware with no current GA
     availability. It is kept as a declared layer (`layers.memory` in
     `stack.yaml`) so the architecture has an honest answer at fleet scale, but
     it is not scheduled and is not in any profile.
+
+## Phase 4 — GPU serving on RunPod
+
+**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint, alongside the Phase 3
+CPU path and the commercial APIs.
+
+The serving layer is externally managed rather than a Compose container.
+LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The
+GPU pod is provisioned in the RunPod console; nothing in this repository
+changes. KV-cache stays pod-local (CPU RAM + NVMe on the pod) — do not
+route it to the EC2 instance's MinIO over the internet.
+
+Acceptance criteria:
+
+- `gpt-4o`, `claude-sonnet`, `qwen-0.5b`, and `qwen-7b` use the same client
+  protocol and all appear in one Langfuse project
+- GPU runtime cost is reported separately from Langfuse's per-token data
+- Phase 3 layers continue to function when the RunPod pod is not running
+
+`qwen-7b` can fall back to `gpt-4o` in connected profiles. The renderer must
+prune that fallback in `airgapped`; a stopped remote model should fail rather
+than silently egress.
 
 ## Phase 5 — Operating recipes
 
@@ -329,10 +329,10 @@ Acceptance criteria:
 |---|---|---|
 | `phase-1` | gateway, observability, UI | `gpt-4o`, `claude-sonnet` |
 | `phase-2` | Phase 1 + tools | frontier models |
-| `phase-3` | Phase 2 + GPU serving (RunPod) | frontier models + `qwen-7b` |
-| `phase-4` | Phase 3 + CPU serving + storage + KV cache | all |
+| `phase-3` | Phase 2 + CPU serving + storage + KV cache | frontier models + `qwen-0.5b` |
+| `phase-4` | Phase 3 + GPU serving (RunPod) | all |
 | `phase-5` | Same infrastructure as Phase 4 | all |
 | `headless` | gateway and observability | enabled models |
-| `airgapped` | gateway, observability, UI, serving | `qwen-7b` only |
+| `airgapped` | gateway, observability, UI, CPU serving | `qwen-0.5b` only |
 
 `stack.yaml` remains authoritative for exact membership and current status.
