@@ -163,7 +163,7 @@ Implementations take two broad forms — **물리적 망분리**, where internal
 **Why it decides this architecture.** In a separated environment there is no route from the internal network to `api.openai.com`. This is not a matter of a firewall rule someone could be persuaded to add — the absence of that route *is* the control. So for these buyers:
 
 - Phase 1 of this stack, which sends every request to a commercial API, **cannot run inside the boundary at all**
-- the model has to be served inside the boundary, which is what [Phase 3](phases.md#phase-3-self-hosted-serving) is for
+- the model has to be served inside the boundary, which is what [Phase 3](phases.md#phase-3--cpu-serving-and-minio-kv-cache) (CPU) and [Phase 4](phases.md#phase-4--gpu-serving-on-runpod) (GPU) are for
 - the observability stack has to be self-hosted too, since traces contain the prompts
 - `--profile airgapped` **prunes** commercial fallbacks from the generated config rather than merely disabling them — because in this context "we configured it not to" is a promise, not a control
 

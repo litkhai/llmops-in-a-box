@@ -3,7 +3,7 @@
 A ten-minute walkthrough. The arc is **config → traffic → observability → the ClickHouse close**.
 
 !!! note "Phase 1 scope"
-    This is the Phase 1 demo: two frontier models through one gateway, fully traced. From Phase 3 you open with the RunPod pod instead — see [the variation below](#variation-from-phase-3).
+    This is the Phase 1 demo: two frontier models through one gateway, fully traced. From Phase 4 you open with the RunPod pod instead — see [the variation below](#variation-from-phase-4).
 
 ---
 
@@ -130,9 +130,9 @@ Then hand back to the phases: *this is Phase 1. The same config adds tools, self
 
 ---
 
-## Variation — from Phase 3
+## Variation — from Phase 4
 
-This variation arrives with Phase 3. It is not part of the current runnable
+This variation arrives with Phase 4. It is not part of the current runnable
 demo.
 
 Open with the serving layer instead, then follow the same arc:

@@ -315,9 +315,9 @@ accessible only within the Docker network by the LiteLLM container.
 
 ---
 
-## External vLLM serving
+## GPU serving — vLLM on RunPod
 
-Phase 3 is not built yet and is not required for the current demo. The design
+Phase 4 is not built yet and is not required for the current demo. The design
 treats vLLM as an externally managed OpenAI-compatible endpoint rather than a
 local Compose service. When implemented, it will require:
 

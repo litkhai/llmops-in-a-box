@@ -130,6 +130,7 @@ flowchart TB
     CF["Cloudflare Workers AI<br/><small>FLUX.1-schnell</small>"]
     IMGMI[("MinIO<br/><small>generated images<br/>media.&lt;domain&gt;</small>")]
     MCP["MCP servers<br/><small>ClickHouse Cloud</small>"]
+    CPU["llama.cpp :8080<br/><small>Qwen2.5-0.5B · CPU</small>"]
     VL["vLLM :8000<br/><small>Qwen2.5-7B on RunPod</small>"]
 
     LF["<b>Langfuse</b><br/><small>:3000 · traces · sessions<br/>datasets · evals</small>"]
@@ -147,8 +148,9 @@ flowchart TB
     GW -->|"Phase 1 (images)"| CF
     CF --> IMGMI
     GW -->|Phase 2| MCP
-    GW -->|Phase 3| VL
-    VL -.->|Phase 4| ST
+    GW -->|Phase 3| CPU
+    CPU -.->|"Phase 3 (KV cache)"| ST
+    GW -->|Phase 4| VL
 
     GW -.->|"traces: prompt, tokens,<br/>latency, cost, errors"| LF
     LF --- CH
@@ -163,15 +165,15 @@ flowchart TB
     classDef obs fill:#0969da,stroke:#0969da,color:#fff
     class OA,AN,CF,IMGMI p1
     class MCP p2
-    class VL p3
-    class ST p4
+    class CPU,ST p3
+    class VL p4
     class LF obs
 ```
 
 The two MinIO instances are deliberate. Langfuse runs one for its own blobs;
 the image-hosting MinIO is a separate bucket served via `media.<domain>` so
 generated images are accessible over HTTPS without coupling to Langfuse's
-internal storage. AIStor (Phase 4) adds a third store for dataset and artifact
+internal storage. AIStor (Phase 3) adds a third store for dataset and artifact
 lifecycle that you own end to end.
 
 ### The layers
@@ -184,11 +186,13 @@ lifecycle that you own end to end.
 | Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
 | Image generation | Cloudflare Workers AI (FLUX.1-schnell) → MinIO (`media.<domain>`) | <span class="phase phase-1">1</span> |
 | Tools | MCP servers — ClickHouse Cloud, wired into LiteLLM gateway | <span class="phase phase-2">2</span> |
-| Serving | vLLM | <span class="phase phase-3">3</span> |
-| Models | Self-hosted — Qwen, EXAONE, EEVE | <span class="phase phase-3">3</span> |
-| Compute | RunPod · AWS | <span class="phase phase-3">3</span> |
-| Storage | MinIO AIStor — datasets, artifacts, weights | <span class="phase phase-4">4</span> |
-| KV cache | LMCache — prefill a long shared prefix once, reuse it | <span class="phase phase-4">4a</span> |
+| Serving (CPU) | llama.cpp — quantized model on EC2 CPU | <span class="phase phase-3">3</span> |
+| Models | Self-hosted — Qwen 0.5B (CPU) | <span class="phase phase-3">3</span> |
+| Storage | MinIO AIStor — datasets, artifacts, weights, KV cache | <span class="phase phase-3">3</span> |
+| KV cache | LMCache — prefill a long shared prefix once, reuse it | <span class="phase phase-3">3</span> |
+| Serving (GPU) | vLLM on RunPod | <span class="phase phase-4">4</span> |
+| Models | Self-hosted — Qwen 7B, EXAONE, EEVE | <span class="phase phase-4">4</span> |
+| Compute | RunPod GPU | <span class="phase phase-4">4</span> |
 | *(recipes)* | Context routing · LibreChat Agents · Langfuse evals — no new layer | <span class="phase phase-5">5</span> |
 
 The layer list is the invariant. Which implementation fills a row is a
@@ -198,7 +202,7 @@ without rewriting the ones already there.
 ### A single request, end to end
 
 1. A user sends a message in LibreChat (or any OpenAI-compatible client) and
-   picks a model — `gpt-4o`, `claude-sonnet`, or from Phase 3, `qwen-7b`.
+   picks a model — `gpt-4o`, `claude-sonnet`, `qwen-0.5b` (Phase 3 CPU), or `qwen-7b` (Phase 4 GPU).
    Selecting `auto` activates language-aware routing at the gateway.
 2. LiteLLM receives it on **one unified endpoint**, resolves the model alias,
    and routes it to the right provider. Anthropic's format translation is
@@ -257,8 +261,8 @@ flowchart LR
 !!! warning "Phase 1 is not an air-gapped deployment"
     At least one external model-provider key is required, and every model
     request leaves the local network. Sovereignty is the argument the
-    architecture makes; it becomes demonstrable in Phase 3, when there is a
-    self-hosted model for `--profile airgapped` to fall back to. See
+    architecture makes; it becomes demonstrable in Phase 3, when the CPU-served
+    `qwen-0.5b` enables `--profile airgapped` with no commercial API. See
     [Background](background.md#the-cross-border-question) for why the transfer
     question is the one that decides it.
 
@@ -270,8 +274,8 @@ flowchart LR
 |:--:|---|---|
 | <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | In progress |
 | <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Runnable — ClickHouse Cloud via MCP |
-| <span class="phase phase-3">3</span> | vLLM self-hosted serving alongside provider APIs | Not built yet |
-| <span class="phase phase-4">4</span> | Artifact storage and KV-cache reuse | Not built yet |
+| <span class="phase phase-3">3</span> | CPU serving (llama.cpp) and MinIO KV cache | Not built yet |
+| <span class="phase phase-4">4</span> | GPU serving on RunPod | Not built yet |
 | <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
 The Status column reports implementation state, not scope. AWS EC2 and
