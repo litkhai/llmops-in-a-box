@@ -5,8 +5,10 @@ A composable LLMOps reference stack built around a single gateway:
 - **LiteLLM** for model routing and cost tracking
 - **Langfuse** for traces, sessions, datasets, and evaluations
 - **LibreChat** for the user interface
-- **OpenAI and Anthropic** for chat, **Cloudflare Workers AI** for image generation, and **MinIO** for image storage in the current Phase 1 stack
-- **MCP, vLLM, RunPod, and MinIO AIStor** in later phases
+- **OpenAI and Anthropic** for chat, **Cloudflare Workers AI** for image generation, and **MinIO** for image storage — running today
+- **ClickHouse Cloud** as the first MCP tool server, wired into the gateway — running today
+- **llama.cpp, MinIO AIStor, LMCache** for CPU serving and KV cache in Phase 3
+- **vLLM and RunPod** for GPU serving in Phase 4
 
 The phases are a build order rather than a menu. The destination is an agent
 platform: models served inside the network boundary, private data reached
@@ -35,13 +37,17 @@ names, and deployment targets.
 | Image generation (Cloudflare Workers AI FLUX.1-schnell) | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | Runnable |
 | AWS EC2 target | Runnable |
-| Phase 2 — MCP tool layer (ClickHouse Cloud) | Runnable — ClickHouse Cloud via MCP |
-| Phases 3–5 | Not built yet |
+| Phase 2 — MCP tool layer (ClickHouse Cloud) | Runnable |
+| Phase 3 — CPU serving and MinIO KV cache | Not built yet |
+| Phase 4 — GPU serving on RunPod | Not built yet |
+| Phase 5 — Operating recipes | Not built yet |
 
 If Langfuse traces are missing, a `LANGFUSE_MIGRATION_V4_WRITE_MODE` incompatibility in Langfuse v4 RC builds may be the cause — see [Deployment troubleshooting](https://litkhai.github.io/llmops-in-a-box/deployment/#troubleshooting) for details.
 
 Phase 1 sends model requests to an external provider. It demonstrates the
 gateway and observability architecture; it is not an air-gapped deployment.
+`--profile airgapped` becomes meaningful in Phase 3, when CPU-served `qwen-0.5b`
+makes the boundary real rather than configured.
 
 ## Quick start
 
@@ -90,17 +96,21 @@ LiteLLM Gateway ──────────── traces ──────�
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
         │                  stores ─▶ MinIO → media.<domain>
-        ├─▶ MCP tools (mcp-clickhouse)   phase 2
-        └─▶ vLLM on RunPod              phase 3
-                 │
-                 └─▶ MinIO AIStor       phase 4
-                     datasets · artifacts · weights · KV cache
+        ├─▶ MCP tools (ClickHouse Cloud)         phase 2
+        ├─▶ llama.cpp CPU (qwen-0.5b)            phase 3
+        │        └─▶ MinIO AIStor                phase 3
+        │            datasets · artifacts · weights · KV cache
+        └─▶ vLLM on RunPod (qwen-7b)             phase 4
 ```
 
 Phase 1 runs today. One model alias (`auto`) in the chat UI routes to the right
 provider: English text → gpt-4o, Korean → claude-sonnet, image-intent messages
 → Cloudflare Workers AI FLUX.1-schnell — all via a single
 `UnifiedRouter` callback, all emitting traces to Langfuse.
+
+Phase 2 is also runnable. ClickHouse Cloud is exposed as an MCP server wired
+directly into the LiteLLM gateway, so every tool call is traced alongside the
+model calls that triggered it. No client-side wiring required.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model
 alias and sends success and failure telemetry to Langfuse. The model catalog is
@@ -111,17 +121,19 @@ Adding a later layer changes gateway configuration, not client code.
 
 | Phase | Outcome | Status |
 |:--:|---|---|
-| 1 | Gateway, UI, and tracing over frontier APIs | In progress |
-| 2 | MCP tool layer, starting with ClickHouse Cloud | Runnable — ClickHouse Cloud via MCP |
-| 3 | vLLM self-hosted serving alongside provider APIs | Not built yet |
-| 4 | Artifact storage and KV-cache reuse | Not built yet |
+| 1 | Gateway, UI, and tracing over frontier APIs | Runnable |
+| 2 | MCP tool layer, starting with ClickHouse Cloud | Runnable |
+| 3 | CPU serving (llama.cpp) and MinIO KV cache | Not built yet |
+| 4 | GPU serving on RunPod | Not built yet |
 | 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
 
-The Status column reports implementation state, not scope. See
-[Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for the
-end state, the acceptance criteria of each phase, and why the order is what it
-is. Nothing here is documented as runnable before its deployable artifact
-exists.
+Phase 3 runs entirely on existing EC2 infrastructure — no GPU pod or external
+account needed. Phase 4 adds RunPod GPU serving on top of Phase 3 when a GPU
+budget is available. The two paths are independent; either can come first.
+
+See [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for
+the end state, the acceptance criteria of each phase, and why the order is what
+it is.
 
 ## Control plane
 
@@ -155,9 +167,10 @@ generated from it. Neither file should be committed or printed. See
 ```text
 stack.yaml                  declarative source of truth
 scripts/stack.sh            control plane
-docker/                     runnable Phase 1 Compose target
+docker/                     runnable Phase 1 + 2 Compose target
 secrets/                    credential template and local inventory
 docs/                       MkDocs documentation
+terraform/                  AWS EC2 provisioning
 AGENTS.md                   repository guidance for coding agents
 ```
 
