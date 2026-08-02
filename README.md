@@ -25,8 +25,7 @@ The current runnable target is a single-node Docker Compose deployment.
 names, and deployment targets.
 
 [Documentation](https://litkhai.github.io/llmops-in-a-box/) ·
-[Getting started](https://litkhai.github.io/llmops-in-a-box/getting-started/) ·
-[Phase 1 workshop](https://litkhai.github.io/llmops-in-a-box/workshop/)
+[Getting started](https://litkhai.github.io/llmops-in-a-box/getting-started/)
 
 ## Current status
 
