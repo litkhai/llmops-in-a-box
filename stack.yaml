@@ -627,9 +627,11 @@ secrets:
       - LANGFUSE_INIT_USER_PASSWORD
       - UI_USERNAME
       - UI_PASSWORD
-      # Langfuse → ClickHouse Cloud writer (llmops database).
-      # Create on ClickHouse Cloud: CREATE USER langfuse_writer IDENTIFIED BY '...';
-      #                             GRANT ALL ON llmops.* TO langfuse_writer;
+      # Langfuse → ClickHouse Cloud (llmops database).
+      # CLICKHOUSE_CLOUD_HOST: hostname only, no port (e.g. abc.clickhouse.cloud).
+      # Create writer on ClickHouse Cloud: CREATE USER langfuse_writer IDENTIFIED BY '...';
+      #                                    GRANT ALL ON llmops.* TO langfuse_writer;
+      - CLICKHOUSE_CLOUD_HOST
       - LANGFUSE_CLICKHOUSE_USER
       - LANGFUSE_CLICKHOUSE_PASSWORD
       - POSTGRES_USER
@@ -658,7 +660,6 @@ secrets:
       - DOMAIN_SSL_EMAIL
     2:
       - MCP_CLICKHOUSE_URL
-      - CLICKHOUSE_CLOUD_HOST
       - CLICKHOUSE_CLOUD_USER
       - CLICKHOUSE_CLOUD_PASSWORD
     3:

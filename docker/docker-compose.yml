@@ -44,7 +44,7 @@ x-langfuse-env: &langfuse-env
   TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
   LANGFUSE_MIGRATION_V4_WRITE_MODE: "dual"
 
-  CLICKHOUSE_URL: https://${CLICKHOUSE_CLOUD_HOST:?CLICKHOUSE_CLOUD_HOST required — run ./scripts/stack.sh secrets setup --phase 2}:8443
+  CLICKHOUSE_URL: https://${CLICKHOUSE_CLOUD_HOST:?CLICKHOUSE_CLOUD_HOST required — run ./scripts/stack.sh secrets setup --phase 1}:8443
   CLICKHOUSE_MIGRATION_URL: clickhouses://${CLICKHOUSE_CLOUD_HOST}:9440
   CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:?LANGFUSE_CLICKHOUSE_USER required — run ./scripts/stack.sh secrets setup --phase 1}
   CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD required — run ./scripts/stack.sh secrets setup --phase 1}
