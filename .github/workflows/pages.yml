@@ -11,21 +11,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
@@ -33,30 +31,9 @@ jobs:
 
       - run: pip install -r requirements-docs.txt
 
-      # mkdocs.yml sets strict: true, so a broken internal link fails here
-      # rather than shipping a 404.
       - run: mkdocs build --strict
 
-      # ONE-TIME PREREQUISITE — this step fails until Pages is switched on:
-      #   Settings → Pages → Build and deployment → Source: GitHub Actions
-      #
-      # `enablement: true` is deliberately NOT used here. It calls
-      # POST /repos/{owner}/{repo}/pages, which the default GITHUB_TOKEN may
-      # not do ("Resource not accessible by integration"). The `pages: write`
-      # permission below allows deploying to an existing Pages site, not
-      # creating one — that needs repo-admin rights.
-      - uses: actions/configure-pages@v6
-
-      - uses: actions/upload-pages-artifact@v5
+      - uses: peaceiris/actions-gh-pages@v4
         with:
-          path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
