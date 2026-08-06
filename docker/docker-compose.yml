@@ -44,10 +44,11 @@ x-langfuse-env: &langfuse-env
   TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
   LANGFUSE_MIGRATION_V4_WRITE_MODE: "dual"
 
-  CLICKHOUSE_URL: http://clickhouse:8123
-  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
-  CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
-  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required — run ./scripts/stack.sh secrets gen}
+  CLICKHOUSE_URL: https://${CLICKHOUSE_CLOUD_HOST:?CLICKHOUSE_CLOUD_HOST required — run ./scripts/stack.sh secrets setup --phase 2}:8443
+  CLICKHOUSE_MIGRATION_URL: clickhouses://${CLICKHOUSE_CLOUD_HOST}:9440
+  CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:?LANGFUSE_CLICKHOUSE_USER required — run ./scripts/stack.sh secrets setup --phase 1}
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD required — run ./scripts/stack.sh secrets setup --phase 1}
+  CLICKHOUSE_DB: llmops
   CLICKHOUSE_CLUSTER_ENABLED: "false"
 
   REDIS_HOST: redis
@@ -96,8 +97,6 @@ x-langfuse-env: &langfuse-env
 x-backend-deps: &backend-deps
   postgres:
     condition: service_healthy
-  clickhouse:
-    condition: service_healthy
   redis:
     condition: service_healthy
   minio:
@@ -128,50 +127,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  clickhouse:
-    # 26.4 is what the v4 upgrade guide recommends; 25.12 is its stated minimum
-    # ("Required for lightweight updates, the JSON type, and full-text search").
-    # Downgrading this below 25.12 breaks Langfuse v4 — the two are coupled.
-    #
-    # `-alpine`, not `-distroless`: the healthcheck below runs through a shell,
-    # and distroless has none.
-    image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG:-26.4-alpine}
-    profiles: [obs]
-    restart: unless-stopped
-    user: "101:101"
-    environment:
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
-      CLICKHOUSE_DB: default
-    ports:
-      # HTTP only — this is what `stack.sh status` health-checks. The native
-      # protocol on 9000 is used by Langfuse migrations over the compose
-      # network and never from the host, so publishing it would only collide
-      # with something (MinIO's own default is also 9000).
-      - "0.0.0.0:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-      - clickhouse-logs:/var/log/clickhouse-server
-      # Caps max_server_memory_usage. Without this ClickHouse sizes itself
-      # against the whole Docker VM and plans for memory the other eight
-      # containers need. See the file for the numbers.
-      - ./clickhouse-config/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
-    # Above the 2 GiB configured inside ClickHouse, so it fails a query at its
-    # own limit rather than being OOM-killed at the cgroup limit.
-    mem_limit: ${CLICKHOUSE_MEM_LIMIT:-3g}
-    ulimits:
-      nofile: { soft: 262144, hard: 262144 }
-    healthcheck:
-      # 127.0.0.1, not localhost. ClickHouse cannot bind IPv6 in this
-      # container, and busybox wget resolves localhost to [::1] first — the
-      # healthcheck then reports "connection refused" against a server that is
-      # up and answering perfectly well on IPv4.
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://0.0.0.0:8123/ping || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
 
   redis:
     # 7.2 is what the v4 guide recommends. Pinned to the minor rather than `7`
@@ -206,8 +161,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
     ports:
-      # 9002 on the host, not 9000 — ClickHouse's native port already has that,
-      # and stack.yaml declares this pair as { api: 9002, console: 9001 }.
+      # 9002 on the host, not 9000 — avoids collisions with other services;
+      # stack.yaml declares this pair as { api: 9002, console: 9001 }.
       - "0.0.0.0:${MINIO_API_PORT:-9002}:9000"
       - "0.0.0.0:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
@@ -230,9 +185,6 @@ services:
   #  replaces the separate traces/observations tabs, and trace_id becomes an
   #  ordinary filter column. The infrastructure is identical to v3: web +
   #  worker + Postgres + ClickHouse + Redis + S3, every one of them mandatory.
-  #
-  #  Coupled to CLICKHOUSE_IMAGE_TAG above: v4 needs ClickHouse 25.12 or newer.
-  #  Moving one without the other breaks the stack.
   #
   #  LANGFUSE_MIGRATION_V4_WRITE_MODE is set to "dual" below. The v4 RC
   #  defaults to "events_only", which rejects SDK v2 trace-create events from
@@ -485,8 +437,6 @@ services:
 
 volumes:
   postgres-data:
-  clickhouse-data:
-  clickhouse-logs:
   minio-data:
   mongo-data:
   caddy-data:

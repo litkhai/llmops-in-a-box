@@ -78,6 +78,7 @@ These values must be obtained from their provider or environment:
 |---|---|---|
 | Phase 1 models | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | At least one is needed for the workshop |
 | Optional Langfuse | `LANGFUSE_EE_LICENSE_KEY` | Leave blank for the OSS feature set |
+| Phase 1 Langfuse tracing | `LANGFUSE_CLICKHOUSE_USER`, `LANGFUSE_CLICKHOUSE_PASSWORD` | ClickHouse Cloud writer for the `llmops` database — `GRANT ALL ON llmops.*` |
 | Phase 2 MCP | `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`, `CLICKHOUSE_CLOUD_PASSWORD` | ClickHouse Cloud credentials — use a dedicated read-only database user |
 | Phase 1 image gen | `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; absent silently disables image generation |
 | Phase 4 GPU serving | `RUNPOD_API_KEY`, `VLLM_API_BASE`, `VLLM_API_KEY` | The vLLM base URL must end in `/v1` |

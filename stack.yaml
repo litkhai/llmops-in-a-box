@@ -314,9 +314,9 @@ layers:
       # artifact store that happens to also be MinIO.
       backends:
         clickhouse:
-          image: clickhouse/clickhouse-server:24.12
-          ports: { http: 8123, native: 9000 }
-          role: OLAP trace storage
+          managed_by: clickhouse-cloud
+          database: llmops
+          role: OLAP trace storage — ClickHouse Cloud, not a local container
         postgres:
           image: postgres:16-alpine
           ports: { tcp: 5432 }
@@ -627,8 +627,11 @@ secrets:
       - LANGFUSE_INIT_USER_PASSWORD
       - UI_USERNAME
       - UI_PASSWORD
-      - CLICKHOUSE_USER
-      - CLICKHOUSE_PASSWORD
+      # Langfuse → ClickHouse Cloud writer (llmops database).
+      # Create on ClickHouse Cloud: CREATE USER langfuse_writer IDENTIFIED BY '...';
+      #                             GRANT ALL ON llmops.* TO langfuse_writer;
+      - LANGFUSE_CLICKHOUSE_USER
+      - LANGFUSE_CLICKHOUSE_PASSWORD
       - POSTGRES_USER
       - POSTGRES_PASSWORD
       - MINIO_ROOT_USER
@@ -693,9 +696,7 @@ health:
     - name: librechat
       layer: ui
       url: http://{{host}}:3080/health
-    - name: clickhouse
-      layer: observability
-      url: http://{{host}}:8123/ping
+    # ClickHouse is now ClickHouse Cloud — no local health endpoint to check.
     - name: langfuse-minio
       layer: observability
       url: http://{{host}}:9002/minio/health/live

@@ -354,6 +354,18 @@ gateway configuration, not the client protocol.
     LiteLLM reads Langfuse keys at startup. Validate the credentials, then run
     `./scripts/stack.sh up` again to reload them.
 
+??? question "Langfuse fails to start — ClickHouse connection error"
+    Langfuse now connects to ClickHouse Cloud instead of a local container.
+    Verify that `LANGFUSE_CLICKHOUSE_USER` and `LANGFUSE_CLICKHOUSE_PASSWORD`
+    are set and that the user has `GRANT ALL ON llmops.*` on ClickHouse Cloud.
+    The `llmops` database must exist before the first boot:
+
+    ```sql
+    CREATE DATABASE IF NOT EXISTS llmops;
+    CREATE USER langfuse_writer IDENTIFIED BY '<password>';
+    GRANT ALL ON llmops.* TO langfuse_writer;
+    ```
+
 ??? question "The Kubernetes target refuses to start"
     Expected in the current repository. That target is a declaration of the
     intended interface, not a completed deployment artifact.
