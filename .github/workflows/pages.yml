@@ -15,10 +15,9 @@ permissions:
   pages: write
   id-token: write
 
-# Never run two deploys at once, but let an in-flight deploy finish.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
