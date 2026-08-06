@@ -134,7 +134,7 @@ flowchart TB
     VL["vLLM :8000<br/><small>Qwen2.5-7B on RunPod</small>"]
 
     LF["<b>Langfuse</b><br/><small>:3000 · traces · sessions<br/>datasets · evals</small>"]
-    CH[("ClickHouse<br/><small>OLAP traces</small>")]
+    CH[("ClickHouse Cloud<br/><small>OLAP traces · llmops db</small>")]
     PG[("Postgres")]
     RD[("Redis")]
     MI[("MinIO")]
@@ -181,7 +181,7 @@ lifecycle that you own end to end.
 | Layer | Implementation | Phase |
 |---|---|:--:|
 | UI | LibreChat | <span class="phase phase-1">1</span> |
-| Observability | Langfuse (ClickHouse · Postgres · Redis · MinIO) | <span class="phase phase-1">1</span> |
+| Observability | Langfuse (ClickHouse Cloud · Postgres · Redis · MinIO) | <span class="phase phase-1">1</span> |
 | Gateway | LiteLLM — routing, virtual keys, cost tracking | <span class="phase phase-1">1</span> |
 | Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
 | Image generation | Cloudflare Workers AI (FLUX.1-schnell) → MinIO (`media.<domain>`) | <span class="phase phase-1">1</span> |
@@ -240,13 +240,15 @@ flowchart LR
     CF["Cloudflare Workers AI"]
     IMGMI[("MinIO (images)")]
     L["Langfuse"]
-    D["ClickHouse · Postgres<br/>Redis · MinIO"]
+    CH[("ClickHouse Cloud<br/><small>llmops db</small>")]
+    D["Postgres · Redis · MinIO"]
 
     C --> G
     G --> O
     G --> A
     G --"image callback"--> CF --> IMGMI
     G -. traces .-> L
+    L --- CH
     L --- D
 ```
 
@@ -256,7 +258,7 @@ flowchart LR
 - Cloudflare Workers AI (FLUX.1-schnell) generates images on demand; results
   are uploaded to MinIO and served via `media.<domain>`.
 - Langfuse records traces, tokens, latency, cost, and failures.
-- ClickHouse, Postgres, Redis, and MinIO support the application services.
+- **ClickHouse Cloud** (`llmops` database) stores trace analytics. Postgres, Redis, and MinIO run locally for Langfuse's application data.
 
 !!! warning "Phase 1 is not an air-gapped deployment"
     At least one external model-provider key is required, and every model

@@ -92,9 +92,7 @@ Acceptance criteria:
 - success and failure telemetry reaches Langfuse
 - per-model token and cost data is visible
 
-The profile starts nine containers because Langfuse and LibreChat require
-ClickHouse, Postgres, Redis, MinIO, MongoDB, and a worker in addition to their
-visible services.
+The profile starts eight local containers. Langfuse connects to **ClickHouse Cloud** for trace analytics (`llmops` database) and runs Postgres, Redis, MinIO, MongoDB, and a worker locally. LibreChat adds MongoDB.
 
 !!! warning "Phase 1 is not sovereign"
     Every model request goes to OpenAI or Anthropic. The gateway and tracing
