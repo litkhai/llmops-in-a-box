@@ -270,18 +270,18 @@ flowchart LR
 
 ## How the phases get there
 
-| Phase | Outcome | Status |
-|:--:|---|---|
-| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | In progress |
-| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | Runnable — ClickHouse Cloud via MCP |
-| <span class="phase phase-3">3</span> | CPU serving (llama.cpp) and MinIO KV cache | Not built yet |
-| <span class="phase phase-4">4</span> | GPU serving on RunPod | Not built yet |
-| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | Not built yet |
+| Phase | Outcome | Target | Status |
+|:--:|---|---|---|
+| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | Docker or EC2 | In progress |
+| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | EC2 | Runnable — ClickHouse Cloud via MCP |
+| <span class="phase phase-3">3</span> | CPU serving (llama.cpp) and MinIO KV cache | EC2 | Not built yet |
+| <span class="phase phase-4">4</span> | GPU serving on RunPod | EC2 + RunPod | Not built yet |
+| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
 
-The Status column reports implementation state, not scope. AWS EC2 and
-Kubernetes targets are declared in `stack.yaml` but their deployment artifacts
-are not implemented either. See [Build-out phases](phases.md) for the end state
-and the acceptance criteria of each phase.
+The Status column reports implementation state, not scope. Phase 1 runs on
+local Docker or EC2. Phase 2 and above require `--target aws-ec2`. See
+[Build-out phases](phases.md) for the end state and acceptance criteria of each
+phase.
 
 ---
 

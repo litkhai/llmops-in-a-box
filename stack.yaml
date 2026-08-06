@@ -92,7 +92,7 @@ phases:
 #  bring the stack up today.
 # ─────────────────────────────────────────────────────────────────────────────
 defaults:
-  target: docker
+  target: docker      # Phase 1 only; use --target aws-ec2 for Phase 2+
   profile: phase-1
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,29 +166,22 @@ targets:
 
   docker:
     kind: compose
-    description: Single-node Docker Compose on a laptop
+    description: >-
+      Phase 1 development target — local Docker Compose. Phase 2 and above
+      require the aws-ec2 target: CPU inference is impractically slow on a
+      laptop, and RunPod (Phase 4) is already an external service. Use
+      `docker` to iterate on Phase 1; use `aws-ec2` for everything else.
     compose_file: docker/docker-compose.yml
     env_file: .env
     host: localhost
-    # Every phase is supported here. Worth stating as a declaration rather than
-    # leaving to prose, because the reason it holds is not obvious: `serving`
-    # was never a compose service (managed_by: runpod), so the GPU is reached
-    # over HTTPS exactly like a commercial API, and the laptop needs no GPU of
-    # its own. Phase 3 adds CPU serving locally, and that path's kvcache uses
-    # the local object store — so this target supports it natively.
-    supported_phases: [1, 2, 3, 4, 5]
-    notes:
-      3: >-
-        CPU serving (llama.cpp) runs on the laptop itself. KV-cache offload
-        uses the local MinIO S3 bucket — no tunnel required.
-      4: >-
-        Requires VLLM_API_BASE to point at a running RunPod pod. That is a pod
-        requirement, not a target one — aws-ec2 needs it just the same. GPU KV
-        cache stays pod-local; do not point it at this object store over NAT.
+    supported_phases: [1]
 
   aws-ec2:
     kind: terraform
-    description: Single EC2 instance bootstrapped with the same compose stack
+    description: >-
+      Primary deployment target for Phase 2 and above. Single EC2 instance
+      bootstrapped with the same compose stack; same commands as `docker`,
+      different `--target` flag.
     dir: terraform
     host: null                  # resolved from the `public_ip` terraform output
     # Same five phases as `docker`. Phase 3's CPU serving runs on this instance,

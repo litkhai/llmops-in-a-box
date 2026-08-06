@@ -1,23 +1,23 @@
 # Deployment
 
-`stack.yaml` declares multiple targets, but only the Docker target is
-implemented. This page describes current operations and keeps future targets
-clearly separated.
+The `docker` target supports **Phase 1 only**. Phase 2 and above require
+`--target aws-ec2`. For first-time machine and credential preparation, start
+with [Getting started](getting-started.md).
 
-For first-time machine and credential preparation, start with
-[Getting started](getting-started.md).
+## Target scope
 
-## Target status
+| Target | Phases | Lifecycle | Status |
+|---|---|---|---|
+| `docker` | 1 only | Docker Compose | **Runnable** |
+| `aws-ec2` | 1 – 5 | Terraform → EC2 → Compose | **Runnable** |
+| `k8s` | — | Helm | Planned and disabled |
 
-| Target | Lifecycle | Status |
-|---|---|---|
-| `docker` | Docker Compose | **Runnable** |
-| `aws-ec2` | Terraform → EC2 → Compose | **Runnable** |
-| `k8s` | Helm | Planned and disabled |
+`docker` is the right choice for iterating on Phase 1 without needing an AWS
+account. `aws-ec2` is the primary target for demos and all phases beyond Phase 1.
 
-## Docker
+## Docker (Phase 1)
 
-Start the current Phase 1 profile:
+Start the Phase 1 profile:
 
 ```bash
 ./scripts/stack.sh up --target docker --profile phase-1
@@ -71,10 +71,11 @@ Service credentials initialized into a persistent database or object-store
 volume do not rotate merely because `.env` changes. Rotate the account inside
 the service or recreate disposable volumes.
 
-## AWS EC2
+## AWS EC2 (Phase 2+)
 
-A single EC2 instance running the same Docker Compose stack as the local
-target. Region: `ap-northeast-2`. Instance: `t3.xlarge`, 100 GiB gp3.
+The primary deployment target from Phase 2 onwards. A single EC2 instance
+running the same Docker Compose stack. Region: `ap-northeast-2`. Instance:
+`t3.xlarge`, 100 GiB gp3.
 
 Services are accessible via direct port (3000, 3080, 4000) or, when a domain
 is configured, via HTTPS subdomains (`chat.<domain>`, `langfuse.<domain>`,
@@ -265,29 +266,24 @@ Ports 80 and 443 are open to `0.0.0.0/0` for HTTPS. The remaining ports use
 ## Phase 2 — MCP tool layer
 
 Phase 2 adds the `mcp-clickhouse` service and wires it into the LiteLLM
-gateway. Port 9100 is internal to the Docker network; no security group change
-is needed for the aws-ec2 target.
+gateway. **Requires `--target aws-ec2`.** Port 9100 is internal to the Docker
+network; no security group change is needed.
 
 ### Prerequisites
 
-Set Phase 2 credentials before starting:
+Set Phase 2 credentials and push to SSM:
 
 ```bash
 ./scripts/stack.sh secrets setup --phase 2
-```
-
-For the aws-ec2 target, push them to SSM:
-
-```bash
 ./scripts/stack.sh secrets push --target aws-ec2
 ```
 
 ### Start Phase 2
 
 ```bash
-./scripts/stack.sh render --profile phase-2
-./scripts/stack.sh up --profile phase-2
-./scripts/stack.sh status
+./scripts/stack.sh render --profile phase-2 --target aws-ec2
+./scripts/stack.sh up --profile phase-2 --target aws-ec2
+./scripts/stack.sh status --target aws-ec2
 ```
 
 `render --profile phase-2` generates `docker/litellm_config.yaml` with the
@@ -298,15 +294,10 @@ observability, and UI layers.
 ### Verify the MCP endpoint
 
 ```bash
-curl http://localhost:4000/mcp
-```
-
-A healthy response lists the `clickhouse` server. On the aws-ec2 target,
-use the LiteLLM HTTPS subdomain:
-
-```bash
 curl https://litellm.<domain>/mcp
 ```
+
+A healthy response lists the `clickhouse` server.
 
 ### Published ports (Phase 2)
 

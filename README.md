@@ -29,17 +29,16 @@ names, and deployment targets.
 
 ## Current status
 
-| Scope | Status |
-|---|---|
-| Phase 1 Docker stack | Runnable |
-| OpenAI / Anthropic requests through LiteLLM | Requires at least one provider key |
-| Image generation (Cloudflare Workers AI FLUX.1-schnell) | Runnable; free-tier tokens optional |
-| LiteLLM → Langfuse tracing | Runnable |
-| AWS EC2 target | Runnable |
-| Phase 2 — MCP tool layer (ClickHouse Cloud) | Runnable |
-| Phase 3 — CPU serving and MinIO KV cache | Not built yet |
-| Phase 4 — GPU serving on RunPod | Not built yet |
-| Phase 5 — Operating recipes | Not built yet |
+| Scope | Target | Status |
+|---|---|---|
+| Phase 1 — gateway, UI, tracing | Docker or EC2 | Runnable |
+| OpenAI / Anthropic requests through LiteLLM | — | Requires at least one provider key |
+| Image generation (Cloudflare Workers AI FLUX.1-schnell) | — | Runnable; free-tier tokens optional |
+| LiteLLM → Langfuse tracing | — | Runnable |
+| Phase 2 — MCP tool layer (ClickHouse Cloud) | EC2 | Runnable |
+| Phase 3 — CPU serving and MinIO KV cache | EC2 | Not built yet |
+| Phase 4 — GPU serving on RunPod | EC2 + RunPod | Not built yet |
+| Phase 5 — Operating recipes | EC2 | Not built yet |
 
 If Langfuse traces are missing, a `LANGFUSE_MIGRATION_V4_WRITE_MODE` incompatibility in Langfuse v4 RC builds may be the cause — see [Deployment troubleshooting](https://litkhai.github.io/llmops-in-a-box/deployment/#troubleshooting) for details.
 
@@ -118,17 +117,17 @@ Adding a later layer changes gateway configuration, not client code.
 
 ## Build-out
 
-| Phase | Outcome | Status |
-|:--:|---|---|
-| 1 | Gateway, UI, and tracing over frontier APIs | Runnable |
-| 2 | MCP tool layer, starting with ClickHouse Cloud | Runnable |
-| 3 | CPU serving (llama.cpp) and MinIO KV cache | Not built yet |
-| 4 | GPU serving on RunPod | Not built yet |
-| 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
+| Phase | Outcome | Target | Status |
+|:--:|---|---|---|
+| 1 | Gateway, UI, and tracing over frontier APIs | Docker or EC2 | Runnable |
+| 2 | MCP tool layer, starting with ClickHouse Cloud | EC2 | Runnable |
+| 3 | CPU serving (llama.cpp) and MinIO KV cache | EC2 | Not built yet |
+| 4 | GPU serving on RunPod | EC2 + RunPod | Not built yet |
+| 5 | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
 
-Phase 3 runs entirely on existing EC2 infrastructure — no GPU pod or external
-account needed. Phase 4 adds RunPod GPU serving on top of Phase 3 when a GPU
-budget is available. The two paths are independent; either can come first.
+Phase 1 runs locally with `--target docker` or on `--target aws-ec2`. Phase 2
+and above require EC2: CPU inference needs the instance's CPUs, and RunPod is
+an external service regardless of where the gateway lives.
 
 See [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for
 the end state, the acceptance criteria of each phase, and why the order is what

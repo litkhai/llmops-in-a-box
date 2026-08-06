@@ -2,8 +2,15 @@
 
 A ten-minute walkthrough. The arc is **config → traffic → observability → the ClickHouse close**.
 
-!!! note "Phase 1 scope"
-    This is the Phase 1 demo: two frontier models through one gateway, fully traced. From Phase 4 you open with the RunPod pod instead — see [the variation below](#variation-from-phase-4).
+!!! note "Phase 1 — local or EC2"
+    This walkthrough covers the Phase 1 demo: two frontier models through one
+    gateway, fully traced. It runs on either `--target docker` (local) or
+    `--target aws-ec2`. Phase 2 and above require EC2 — see
+    [the Phase 2 variation below](#variation-from-phase-2).
+
+!!! tip "Phase 4 variation"
+    From Phase 4 you open with the RunPod pod instead — see
+    [the Phase 4 variation below](#variation-from-phase-4).
 
 ---
 
@@ -127,6 +134,27 @@ Open Langfuse. Spend the most time here.
 > to serve.
 
 Then hand back to the phases: *this is Phase 1. The same config adds tools, self-hosted models, and caching without a rewrite.*
+
+---
+
+## Variation — from Phase 2
+
+**Target:** `aws-ec2`. Phase 2 adds MCP tool calls to the trace story.
+
+After the observability section, add one more prompt that triggers a ClickHouse
+tool call:
+
+```
+ClickHouse에 어떤 테이블들이 있어?
+```
+
+In Langfuse, the trace now contains both the model call and the tool call
+(arguments, SQL, result, latency) as sibling spans — no client-side wiring
+needed.
+
+**Talking point:** the gateway traces every request path identically. Adding a
+tool server changes what the model can do; the trace pipeline doesn't change at
+all.
 
 ---
 

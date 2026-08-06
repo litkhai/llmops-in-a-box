@@ -60,21 +60,26 @@ are cumulative.
 ./scripts/stack.sh phases
 ```
 
-| Phase | Outcome | Status |
-|:--:|---|---|
-| 1 | Frontier models through LiteLLM, traced in Langfuse | **Runnable — Docker and AWS EC2** |
-| 2 | MCP tool layer | **Runnable — ClickHouse Cloud via MCP** |
-| 3 | CPU serving and MinIO KV cache | Not built yet |
-| 4 | GPU serving on RunPod | Not built yet |
-| 5 | Routing, agents, guardrails, and judge-scored routing | Not built yet |
+| Phase | Outcome | Target | Status |
+|:--:|---|---|---|
+| 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Runnable** |
+| 2 | MCP tool layer | EC2 | **Runnable — ClickHouse Cloud via MCP** |
+| 3 | CPU serving and MinIO KV cache | EC2 | Not built yet |
+| 4 | GPU serving on RunPod | EC2 + RunPod | Not built yet |
+| 5 | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
 
-The AWS and Kubernetes deployment artifacts are not implemented either. A
-profile can describe a layer before that layer is runnable; `stack.sh` warns and
-skips disabled layers.
+Phase 1 runs on either `--target docker` (local) or `--target aws-ec2`. Phase 2
+and above require EC2: CPU inference is impractically slow on a laptop, and
+RunPod is an external service regardless of where the gateway lives.
+
+The Kubernetes deployment artifact is not implemented. A profile can describe a
+layer before that layer is runnable; `stack.sh` warns and skips disabled layers.
 
 ## Phase 1 — Frontier models
 
 **Adds:** LiteLLM, Langfuse, LibreChat, OpenAI, and Anthropic. No GPU.
+
+**Target:** `docker` (local) or `aws-ec2`.
 
 ```bash
 ./scripts/stack.sh up --profile phase-1
@@ -101,11 +106,14 @@ visible services.
 **Adds:** `mcp-clickhouse` service (port 9100, internal network only) with SSE
 transport, wired into the LiteLLM gateway via `mcp_servers`.
 
+**Target:** `aws-ec2` only. Phase 2 requires the EC2 target; see
+[Getting started — Moving to Phase 2](getting-started.md#moving-to-phase-2).
+
 Deploy with:
 
 ```bash
-./scripts/stack.sh render --profile phase-2
-./scripts/stack.sh up --profile phase-2
+./scripts/stack.sh render --profile phase-2 --target aws-ec2
+./scripts/stack.sh up --profile phase-2 --target aws-ec2
 ```
 
 The `mcp-clickhouse` container is built from `docker/mcp/Dockerfile`
@@ -135,6 +143,9 @@ grants determine what the agent can do.
 
 **Adds:** `qwen-0.5b` served by llama.cpp on the EC2 instance's CPU, MinIO
 AIStor for artifacts, and LMCache writing KV blocks to MinIO S3.
+
+**Target:** `aws-ec2` only. CPU inference runs on the EC2 instance's own CPUs
+(4 vCPUs on `t3.xlarge`); running it on a laptop is impractically slow.
 
 Runs entirely on existing EC2 infrastructure — no external GPU pod or account
 needed. Phase 3 can be built immediately after Phase 2.
@@ -187,6 +198,9 @@ Acceptance criteria:
 
 **Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint, alongside the Phase 3
 CPU path and the commercial APIs.
+
+**Target:** `aws-ec2` + RunPod. The gateway and observability stack run on EC2;
+the GPU inference endpoint is provisioned separately on RunPod.
 
 The serving layer is externally managed rather than a Compose container.
 LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The

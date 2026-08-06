@@ -6,16 +6,30 @@ eventually runs.
 
 ## 1. Choose a target
 
-| Target | Use it for | Status |
+| Target | Scope | Status |
 |---|---|---|
-| `docker` | Local development | **Runnable** |
-| `aws-ec2` | Shared deployment with HTTPS on a custom domain | **Runnable** |
-| `k8s` | A future production deployment | Planned |
+| `docker` | Phase 1 only — local development and iterating on the gateway | **Runnable** |
+| `aws-ec2` | Phase 1 through 5 — primary demo and shared deployment target | **Runnable** |
+| `k8s` | Future production deployment | Planned |
 
-**`aws-ec2`** is recommended when you want to share the stack with others. It
-runs the same Compose stack on a single EC2 instance with automatic HTTPS via
-Caddy (Let's Encrypt). See [Deployment — AWS EC2](deployment.md#aws-ec2) for
-the full guide.
+**Phase 1** (`--target docker`) is the right starting point. It runs the full
+gateway, observability, and UI stack on your laptop using Docker Compose and
+external provider APIs. No GPU, no EC2, no cloud account required.
+
+**Phase 2 and above require `--target aws-ec2`.** The reasons are practical:
+
+- CPU inference (Phase 3) is too slow on a laptop to demo usefully — it runs on
+  the EC2 instance's own CPUs, which is also what the acceptance criteria
+  assumes.
+- RunPod GPU serving (Phase 4) is an external service regardless of where the
+  gateway lives; running the gateway on EC2 keeps latency predictable and avoids
+  NAT traversal.
+- ClickHouse Cloud MCP (Phase 2) requires outbound internet access, which EC2
+  already has and a secured laptop may not.
+
+The Phase 1 workshop below applies to both targets. Start locally if you want
+to iterate quickly; provision EC2 when you are ready for Phase 2 or a shared
+demo.
 
 ## 2. Prepare Docker
 
@@ -88,8 +102,22 @@ The machine and credentials are now ready:
 Continue with the [Phase 1 workshop](workshop.md) to send a request, inspect
 its trace, compare providers, and tear the stack down.
 
-To deploy to AWS EC2 instead of running locally, follow the
-[AWS EC2 deployment guide](deployment.md#aws-ec2). You will need Terraform ≥ 1.5,
-an AWS account with EC2 and SSM access, and an EC2 key pair in `ap-northeast-2`.
-If you want HTTPS on a custom domain, also run `./scripts/stack.sh secrets domain`
-before pushing credentials.
+## Moving to Phase 2
+
+When you are ready for Phase 2 (MCP tool layer), switch to the EC2 target.
+You will need Terraform ≥ 1.5, an AWS account with EC2 and SSM access, and an
+EC2 key pair in `ap-northeast-2`.
+
+```bash
+# Set Phase 2 credentials
+./scripts/stack.sh secrets setup --phase 2
+
+# Push all credentials to SSM
+./scripts/stack.sh secrets push --target aws-ec2
+
+# Provision and start on EC2
+./scripts/stack.sh up --target aws-ec2 --tf-var key_name=<your-key-pair>
+```
+
+See [Deployment — AWS EC2](deployment.md#aws-ec2) for the full guide, including
+optional HTTPS setup with a custom domain.

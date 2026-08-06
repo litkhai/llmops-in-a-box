@@ -174,7 +174,14 @@ Next: use the [Demo flow](demo-flow.md), change the model catalog in
 # Workshop — Phase 2
 
 Phase 2 adds the `mcp-clickhouse` service and wires MCP tools into the LiteLLM
-gateway. Prerequisites: Phase 1 running; ClickHouse Cloud credentials
+gateway.
+
+**Target:** `aws-ec2`. Phase 2 requires the EC2 deployment target. If you are
+still running locally, follow
+[Getting started — Moving to Phase 2](getting-started.md#moving-to-phase-2)
+first to provision the EC2 instance.
+
+**Prerequisites:** Phase 1 running on EC2; ClickHouse Cloud credentials
 configured (see [Credentials — MCP](credentials.md#mcp-clickhouse-cloud)).
 
 **Outcome:** Tool calls from any client reach ClickHouse Cloud through the
@@ -184,6 +191,7 @@ gateway and appear as traces in Langfuse.
 
 ```bash
 ./scripts/stack.sh secrets setup --phase 2
+./scripts/stack.sh secrets push --target aws-ec2
 ```
 
 Enter `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`, and
@@ -192,9 +200,9 @@ Enter `CLICKHOUSE_CLOUD_HOST`, `CLICKHOUSE_CLOUD_USER`, and
 ## 2. Render and start Phase 2
 
 ```bash
-./scripts/stack.sh render --profile phase-2
-./scripts/stack.sh up --profile phase-2
-./scripts/stack.sh status
+./scripts/stack.sh render --profile phase-2 --target aws-ec2
+./scripts/stack.sh up --profile phase-2 --target aws-ec2
+./scripts/stack.sh status --target aws-ec2
 ```
 
 This renders `mcp_servers` into `docker/litellm_config.yaml` and starts the
@@ -203,14 +211,10 @@ This renders `mcp_servers` into `docker/litellm_config.yaml` and starts the
 ## 3. Verify the tools endpoint
 
 ```bash
-curl http://localhost:4000/mcp
-```
-
-The response should list the `clickhouse` server. On the aws-ec2 target:
-
-```bash
 curl https://litellm.<domain>/mcp
 ```
+
+The response should list the `clickhouse` server.
 
 ## 4. Send a tool-calling request
 
@@ -218,12 +222,12 @@ curl https://litellm.<domain>/mcp
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:4000",
+    base_url="https://litellm.<domain>",
     api_key="<LITELLM_MASTER_KEY>",
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model="claude-sonnet",
     messages=[
         {"role": "user", "content": "List the tables available in ClickHouse."}
     ],
