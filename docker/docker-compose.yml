@@ -403,9 +403,12 @@ services:
     restart: unless-stopped
     environment:
       # mcp-clickhouse reads these env vars to connect to ClickHouse Cloud.
-      CLICKHOUSE_HOST: ${CLICKHOUSE_CLOUD_HOST:?CLICKHOUSE_CLOUD_HOST required for MCP}
+      # Use :- (not :?) so Phase 1 profiles can start without Phase 2 MCP credentials.
+      # The container itself will fail at runtime if credentials are missing — that is fine;
+      # it only starts under the `tools` profile which is Phase 2+.
+      CLICKHOUSE_HOST: ${CLICKHOUSE_CLOUD_HOST:-}
       CLICKHOUSE_USER: ${CLICKHOUSE_CLOUD_USER:-default}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_CLOUD_PASSWORD:?CLICKHOUSE_CLOUD_PASSWORD required for MCP}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_CLOUD_PASSWORD:-}
       CLICKHOUSE_SECURE: "true"
       CLICKHOUSE_VERIFY: "true"
     ports:
