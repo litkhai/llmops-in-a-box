@@ -1,0 +1,413 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LLMOps in a Box — theme
+   ══════════════════════════════════════════════════════════════════════════
+   Palette is ClickHouse-adjacent: signature yellow on near-black, with a
+   blue reserved for links so the yellow stays meaningful (CTAs, accents,
+   active state) instead of becoming wallpaper.
+
+   Swap the --ch-* tokens below if you have the official brand values.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --ch-yellow:      #faff69;
+  --ch-yellow-deep: #e8ee45;
+  --ch-yellow-dim:  #b9bf3d;
+  --ch-ink:         #131316;
+  --ch-ink-soft:    #1c1c21;
+  --ch-ink-line:    #2c2c34;
+  --ch-blue:        #4c8dff;
+  --ch-red:         #ff5a5a;
+
+  --ch-p1: #2ea043;  /* phase 1 — frontier      */
+  --ch-p2: #a371f7;  /* phase 2 — MCP tools     */
+  --ch-p3: #d4a72c;  /* phase 3 — self-hosted   */
+  --ch-p4: #4c8dff;  /* phase 4 — artifact store*/
+  --ch-p5: #f778ba;  /* phase 5 — operating recipes. Pink rather than another
+                        cool hue: Phase 5 adds no layers, so it should not
+                        read as one more infrastructure tier. */
+
+  --md-code-font: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Light scheme ─────────────────────────────────────────────────────── */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        var(--ch-ink);
+  --md-primary-fg-color--light: #35353d;
+  --md-primary-fg-color--dark:  #000;
+  --md-accent-fg-color:         #8a8f00;
+  --md-typeset-a-color:         #0b62d6;
+  --md-default-fg-color--light: #55555f;
+}
+
+/* ── Dark scheme ──────────────────────────────────────────────────────── */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color:         var(--ch-ink);
+  --md-default-bg-color--light:  var(--ch-ink-soft);
+  --md-default-fg-color:         #e9e9ee;
+  --md-default-fg-color--light:  #a8a8b5;
+  --md-default-fg-color--lighter:#6e6e7c;
+
+  --md-primary-fg-color:         var(--ch-ink);
+  --md-accent-fg-color:          var(--ch-yellow);
+  --md-typeset-a-color:          var(--ch-blue);
+
+  --md-code-bg-color:            #17171c;
+  --md-code-fg-color:            #dcdce4;
+
+  --md-footer-bg-color:          #0e0e11;
+  --md-footer-bg-color--dark:    #0a0a0c;
+}
+
+/* ══ Typography ════════════════════════════════════════════════════════ */
+
+.md-typeset {
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  letter-spacing: -0.003em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset h2 {
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-top: 2.2em;
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset h3 { font-weight: 600; letter-spacing: -0.012em; }
+
+/* Tabular figures so cost/port columns line up */
+.md-typeset table code,
+.md-typeset td:has(code) { font-variant-numeric: tabular-nums; }
+
+/* ══ Header ════════════════════════════════════════════════════════════ */
+
+.md-header {
+  border-bottom: 1px solid transparent;
+  box-shadow: none;
+  backdrop-filter: blur(12px);
+}
+[data-md-color-scheme="slate"] .md-header {
+  background-color: rgba(19, 19, 22, 0.85);
+  border-bottom-color: var(--ch-ink-line);
+}
+.md-header__title { font-weight: 650; letter-spacing: -0.015em; }
+
+/* Yellow underline on the active top-level tab */
+.md-tabs { border-bottom: 1px solid transparent; }
+[data-md-color-scheme="slate"] .md-tabs {
+  background-color: rgba(19, 19, 22, 0.85);
+  border-bottom-color: var(--ch-ink-line);
+}
+.md-tabs__link { opacity: 0.66; font-weight: 500; transition: opacity 120ms; }
+.md-tabs__link:hover { opacity: 1; }
+.md-tabs__item--active .md-tabs__link {
+  opacity: 1;
+  font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--ch-yellow);
+}
+
+/* ══ Reading measure ═══════════════════════════════════════════════════
+   Hiding the duplicated left nav gave the content box back 242px, taking
+   prose from ~736px to 938px — about 111 characters a line, well past the
+   60-80 that reads comfortably.
+
+   Capped on text blocks only. Tables, code, Mermaid diagrams and the hero
+   keep the full column, because that is where the extra width earns its
+   keep; a 6-column table does not want to be 34rem wide. Headings keep it
+   too, so their rules still span the section.
+
+   Note root font-size is 125% (20px), so 34rem is 680px, not 544px. */
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > dl,
+.md-typeset > blockquote {
+  max-width: 34rem;
+}
+
+/* ══ Hero (landing page) ═══════════════════════════════════════════════ */
+
+/* Material's "edit this page" pencil is the first child of the content and is
+   floated right. `.hero` sets overflow:hidden, which makes it a block
+   formatting context — and a BFC box shrinks to avoid a float instead of
+   flowing under it. That is why the hero measured 906px inside a 938px content
+   box and its right edge sat exactly 32px (the pencil plus its margin) short
+   of every rule and card below it.
+
+   Removing overflow:hidden would fix the width but let the pencil render on
+   top of the hero's corner. Dropping the pencil on the hero page instead: an
+   "edit this page" affordance on a landing page is noise anyway, and with no
+   float there is nothing for the BFC to avoid. Scoped by :has() so every other
+   page keeps its edit link. */
+.md-content__inner:has(> .hero) > .md-content__button {
+  display: none;
+}
+
+.hero {
+  position: relative;
+  /* Horizontal margin is 0, not the -0.8rem it used to be: with the float gone
+     the hero fills the content box exactly, which is what lines it up with the
+     rules and cards below. A negative margin here would overhang them. */
+  margin: -1rem 0 2.6rem;
+  padding: 3.2rem 2rem 2.2rem;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--ch-ink-line);
+  background:
+    radial-gradient(1100px 380px at 12% -12%, rgba(250, 255, 105, 0.11), transparent 62%),
+    radial-gradient(760px 300px at 92% 8%, rgba(76, 141, 255, 0.10), transparent 60%),
+    linear-gradient(175deg, #1a1a20 0%, #131316 100%);
+}
+[data-md-color-scheme="default"] .hero {
+  border-color: #e6e6ea;
+  background:
+    radial-gradient(1000px 340px at 10% -14%, rgba(200, 208, 40, 0.16), transparent 60%),
+    radial-gradient(700px 280px at 92% 6%, rgba(76, 141, 255, 0.10), transparent 58%),
+    linear-gradient(175deg, #fcfcfd 0%, #f4f4f6 100%);
+}
+
+/* hairline of brand yellow across the top */
+.hero::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, var(--ch-yellow), rgba(250,255,105,0) 68%);
+}
+
+.hero .hero-eyebrow {
+  display: inline-block;
+  margin: 0 0 0.85rem;
+  padding: 0.24rem 0.66rem;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ch-yellow-dim);
+  border: 1px solid rgba(250, 255, 105, 0.3);
+  border-radius: 999px;
+  background: rgba(250, 255, 105, 0.06);
+}
+[data-md-color-scheme="default"] .hero .hero-eyebrow {
+  color: #6c7000;
+  border-color: rgba(140, 148, 0, 0.32);
+  background: rgba(200, 208, 40, 0.1);
+}
+
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: 2.9rem;
+  line-height: 1.05;
+  font-weight: 750;
+  letter-spacing: -0.038em;
+}
+.hero .hero-sub {
+  max-width: 46rem;
+  margin: 0 0 0.9rem;
+  font-size: 1.06rem;
+  line-height: 1.6;
+  color: var(--md-default-fg-color--light);
+}
+.hero .hero-stack {
+  font-family: var(--md-code-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.01em;
+  color: var(--md-default-fg-color--lighter);
+}
+.hero .md-button {
+  margin: 1.2rem 0.45rem 0 0;
+  border-radius: 8px;
+  font-weight: 600;
+}
+/* Markdown wraps the buttons in a <p>; its trailing margin plus the hero
+   padding left a dead band under the CTAs. */
+.hero > :last-child { margin-bottom: 0; }
+.hero .md-button--primary {
+  background: var(--ch-yellow);
+  border-color: var(--ch-yellow);
+  color: #14140f;
+}
+.hero .md-button--primary:hover {
+  background: var(--ch-yellow-deep);
+  border-color: var(--ch-yellow-deep);
+  color: #14140f;
+}
+
+@media screen and (max-width: 44.9em) {
+  .hero { padding: 2.2rem 1.2rem 2rem; }
+  .hero h1 { font-size: 2.05rem; }
+}
+
+/* ══ Cards ═════════════════════════════════════════════════════════════ */
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 12px;
+  border-color: var(--ch-ink-line);
+  transition: border-color 140ms, transform 140ms, box-shadow 140ms;
+}
+[data-md-color-scheme="default"] .md-typeset .grid.cards > ul > li {
+  border-color: #e6e6ea;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  border-color: rgba(250, 255, 105, 0.42);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.22);
+}
+.md-typeset .grid.cards > ul > li > hr { display: none; }
+.md-typeset .grid.cards .twemoji,
+.md-typeset .grid.cards .md-icon { color: var(--ch-yellow-dim); }
+
+/* ══ Phase badges ══════════════════════════════════════════════════════ */
+
+.phase {
+  display: inline-block;
+  padding: 0.1rem 0.46rem;
+  border-radius: 5px;
+  font-family: var(--md-code-font);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.phase-1 { background: rgba(46,160,67,.15);  color: var(--ch-p1); border: 1px solid rgba(46,160,67,.4); }
+.phase-2 { background: rgba(163,113,247,.15);color: var(--ch-p2); border: 1px solid rgba(163,113,247,.4); }
+.phase-3 { background: rgba(212,167,44,.15); color: var(--ch-p3); border: 1px solid rgba(212,167,44,.4); }
+.phase-4 { background: rgba(76,141,255,.15); color: var(--ch-p4); border: 1px solid rgba(76,141,255,.4); }
+.phase-5 { background: rgba(247,120,186,.15);color: var(--ch-p5); border: 1px solid rgba(247,120,186,.4); }
+
+/* Colour-code the h3 of each phase section on phases.md */
+.md-typeset h3[id^="phase-"] { padding-left: 0.62rem; border-left: 3px solid var(--ch-ink-line); }
+.md-typeset h3[id^="phase-1"] { border-left-color: var(--ch-p1); }
+.md-typeset h3[id^="phase-2"] { border-left-color: var(--ch-p2); }
+.md-typeset h3[id^="phase-3"] { border-left-color: var(--ch-p3); }
+.md-typeset h3[id^="phase-4"] { border-left-color: var(--ch-p4); }
+.md-typeset h3[id^="phase-5"] { border-left-color: var(--ch-p5); }
+
+/* ══ Tables ════════════════════════════════════════════════════════════ */
+
+.md-typeset table:not([class]) {
+  border-radius: 10px;
+  border: 1px solid var(--ch-ink-line);
+  font-size: 0.76rem;
+  overflow: hidden;
+}
+[data-md-color-scheme="default"] .md-typeset table:not([class]) { border-color: #e6e6ea; }
+.md-typeset table:not([class]) th {
+  font-weight: 650;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--light);
+}
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th { background: #1b1b21; }
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tr:hover { background: rgba(255,255,255,.022); }
+
+/* ══ Code ══════════════════════════════════════════════════════════════ */
+
+.md-typeset pre > code { border-radius: 10px; }
+.md-typeset .highlight > pre { border-radius: 10px; }
+[data-md-color-scheme="slate"] .md-typeset .highlight > pre > code {
+  border: 1px solid var(--ch-ink-line);
+}
+.md-typeset code { border-radius: 4px; font-size: 0.84em; }
+
+/* Console prompts should not be selectable as part of a copy */
+.md-typeset .language-console .go { color: var(--md-default-fg-color--light); }
+
+/* ══ Admonitions ═══════════════════════════════════════════════════════ */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 10px;
+  border-width: 1px;
+  border-left-width: 3px;
+  font-size: 0.76rem;
+  box-shadow: none;
+}
+
+/* ══ Mermaid ═══════════════════════════════════════════════════════════
+   Material themes Mermaid through these tokens, so tuning them here keeps
+   diagrams consistent with the rest of the page and avoids a custom JS
+   init (which would fight Material's own mermaid.initialize call). */
+
+[data-md-color-scheme="slate"] {
+  --md-mermaid-font-family:     "Inter", var(--md-text-font-family), sans-serif;
+  --md-mermaid-bg-color:        transparent;
+  --md-mermaid-node-bg-color:   #21212a;
+  --md-mermaid-node-fg-color:   #3a3a46;
+  --md-mermaid-label-bg-color:  #21212a;
+  --md-mermaid-label-fg-color:  #e9e9ee;
+  --md-mermaid-edge-color:      #5d5d6b;
+}
+[data-md-color-scheme="default"] {
+  --md-mermaid-font-family:     "Inter", var(--md-text-font-family), sans-serif;
+  --md-mermaid-bg-color:        transparent;
+  --md-mermaid-node-bg-color:   #f2f2f5;
+  --md-mermaid-node-fg-color:   #d3d3da;
+  --md-mermaid-label-bg-color:  #ffffff;
+  --md-mermaid-label-fg-color:  #131316;
+  --md-mermaid-edge-color:      #8b8b98;
+}
+
+/* Mermaid renders edge labels ("Phase 1", "traces: ...") into a foreignObject
+   whose colour Material does not map from the tokens above — they came out
+   near-unreadable on the dark surface. */
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel span,
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel p {
+  color: #cfcfda !important;
+  fill: #cfcfda !important;
+  background-color: #1a1a20 !important;
+}
+[data-md-color-scheme="slate"] .md-typeset .mermaid .edgeLabel rect { fill: #1a1a20 !important; }
+
+.md-typeset .mermaid {
+  margin: 1.6rem 0;
+  padding: 1.2rem 0.8rem;
+  border: 1px solid var(--ch-ink-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.014);
+  text-align: center;
+}
+[data-md-color-scheme="default"] .md-typeset .mermaid {
+  border-color: #e6e6ea;
+  background: #fbfbfc;
+}
+
+/* ══ Nav / TOC ═════════════════════════════════════════════════════════ */
+
+.md-nav__title { font-weight: 650; font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.md-nav__link--active { font-weight: 650; }
+.md-nav__item .md-nav__link--active { color: var(--ch-yellow-dim); }
+[data-md-color-scheme="default"] .md-nav__item .md-nav__link--active { color: #0b62d6; }
+
+.md-typeset .headerlink { transition: opacity 120ms; }
+
+/* ══ Footer ════════════════════════════════════════════════════════════ */
+
+.md-footer-meta { font-size: 0.72rem; }
+
+/* ══ Scrollbar (dark only) ═════════════════════════════════════════════ */
+
+[data-md-color-scheme="slate"] * { scrollbar-color: #34343d transparent; scrollbar-width: thin; }
+[data-md-color-scheme="slate"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-md-color-scheme="slate"] ::-webkit-scrollbar-track { background: transparent; }
+[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb {
+  background: #34343d; border-radius: 6px; border: 2px solid var(--ch-ink);
+}
+[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb:hover { background: #45454f; }
+
+/* ══ Selection ═════════════════════════════════════════════════════════ */
+
+::selection { background: rgba(250, 255, 105, 0.26); }
+
+/* ══ Reduced motion ════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .grid.cards > ul > li:hover { transform: none; }
+  * { transition: none !important; }
+}

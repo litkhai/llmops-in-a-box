@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A 3-2-1 feedforward net converging on one output node — which is also
+       the stack's own shape: many models fanning into a single gateway.
+       Chosen over a symmetric 2-3-2 MLP because the left-to-right taper
+       survives a 16px tab, where a denser net collapses into a blob.
+       Edges sit at 0.72 opacity so the nodes carry the silhouette when the
+       strokes stop resolving. The dark plate makes it dark-mode-native: it
+       disappears into a dark tab bar, and keeps the yellow legible on a
+       light one. -->
+  <rect width="32" height="32" rx="7" fill="#131316"/>
+
+  <g stroke="#faff69" stroke-width="1.7" stroke-linecap="round" opacity="0.85">
+    <path d="M6.2 7.2  L16 11.4"/><path d="M6.2 7.2  L16 20.6"/>
+    <path d="M6.2 16   L16 11.4"/><path d="M6.2 16   L16 20.6"/>
+    <path d="M6.2 24.8 L16 11.4"/><path d="M6.2 24.8 L16 20.6"/>
+    <path d="M16 11.4  L25.3 16"/><path d="M16 20.6  L25.3 16"/>
+  </g>
+
+  <g fill="#faff69">
+    <circle cx="6.2"  cy="7.2"  r="2.6"/>
+    <circle cx="6.2"  cy="16"   r="2.6"/>
+    <circle cx="6.2"  cy="24.8" r="2.6"/>
+    <circle cx="16"   cy="11.4" r="2.6"/>
+    <circle cx="16"   cy="20.6" r="2.6"/>
+    <circle cx="25.3" cy="16"   r="3.7"/>
+  </g>
+</svg>

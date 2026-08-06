@@ -1,0 +1,1391 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A composable LLMOps reference stack: one gateway for commercial and self-hosted models, full-stack tracing from the first request, and one declarative stack definition.">
+      
+      
+        <meta name="author" content="Kee Hoon Lee">
+      
+      
+        <link rel="canonical" href="https://litkhai.github.io/llmops-in-a-box/background/">
+      
+      
+        <link rel="prev" href="../workshop/">
+      
+      
+        <link rel="next" href="../phases/">
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.44">
+    
+    
+      
+        <title>Background - LLMOps in a Box</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.0253249f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="yellow">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#background" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="LLMOps in a Box" class="md-header__button md-logo" aria-label="LLMOps in a Box" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LLMOps in a Box
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Background
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="yellow"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="yellow"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/litkhai/llmops-in-a-box" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    litkhai/llmops-in-a-box
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/" class="md-tabs__link">
+          
+  
+  Start
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  Understand
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../deployment/" class="md-tabs__link">
+          
+  
+  Operate
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../demo-flow/" class="md-tabs__link">
+          
+  
+  Present
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="LLMOps in a Box" class="md-nav__button md-logo" aria-label="LLMOps in a Box" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    LLMOps in a Box
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/litkhai/llmops-in-a-box" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    litkhai/llmops-in-a-box
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Start
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Start
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../credentials/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Credentials
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workshop/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Phase 1 workshop
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Understand
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Understand
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Background
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Background
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-goes-wrong-without-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      What goes wrong without this
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-load-bearing-decision-a-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      The load-bearing decision: a gateway
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-observability-at-the-gateway-rather-than-in-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why observability at the gateway rather than in the app
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-each-layer-is-and-what-was-considered-instead" class="md-nav__link">
+    <span class="md-ellipsis">
+      What each layer is, and what was considered instead
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What each layer is, and what was considered instead">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gateway-litellm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Gateway — LiteLLM
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability-langfuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      Observability — Langfuse
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serving-vllm" class="md-nav__link">
+    <span class="md-ellipsis">
+      Serving — vLLM
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-librechat" class="md-nav__link">
+    <span class="md-ellipsis">
+      UI — LibreChat
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compute-runpod" class="md-nav__link">
+    <span class="md-ellipsis">
+      Compute — RunPod
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tools-mcp-with-clickhouse-cloud-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      Tools — MCP, with ClickHouse Cloud first
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-clickhouse-is-under-langfuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why ClickHouse is under Langfuse
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regulatory-context-and-isms-p" class="md-nav__link">
+    <span class="md-ellipsis">
+      Regulatory context — 망분리 and ISMS-P
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Regulatory context — 망분리 and ISMS-P">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#network-separation" class="md-nav__link">
+    <span class="md-ellipsis">
+      망분리 — network separation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#isms-p-the-certification" class="md-nav__link">
+    <span class="md-ellipsis">
+      ISMS-P — the certification
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-cross-border-question" class="md-nav__link">
+    <span class="md-ellipsis">
+      The cross-border question
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glossary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Glossary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where to go next
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phases/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build-out phases
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operate
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Operate
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Deployment targets
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Present
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Present
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo-flow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Demo flow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/litkhai/llmops-in-a-box/edit/main/docs/background.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="background">Background<a class="headerlink" href="#background" title="Permanent link">&para;</a></h1>
+<p>Why this stack is shaped the way it is: the failure mode it is built against, the one architectural decision everything else follows from, what was chosen at each layer and what was considered instead, and the regulatory context that makes self-hosting a requirement rather than a preference for some buyers.</p>
+<p>If you want to run something first, start at
+<a href="../getting-started/">Getting started</a>.</p>
+<hr />
+<h2 id="what-goes-wrong-without-this">What goes wrong without this<a class="headerlink" href="#what-goes-wrong-without-this" title="Permanent link">&para;</a></h2>
+<p>The usual path into GenAI is not a decision, it is an accumulation. One team ships a feature with the OpenAI SDK. Another prefers Anthropic. A third adopts LangChain. A data scientist has a notebook with a personal key in it. None of that is wrong on its own, and after a year it produces a predictable set of problems:</p>
+<p><strong>Nobody can answer what it costs.</strong> Spend is spread across provider invoices with no attribution to teams, features, or users. The finance question — <em>which product line is spending this, and on what</em> — has no owner and no data behind it.</p>
+<p><strong>Nobody can answer what it does.</strong> Prompts, completions, latencies and failures live wherever each framework happens to log them, if at all. When quality regresses there is no record to compare against. When something goes wrong, the first report usually comes from a user.</p>
+<p><strong>Changing models means changing applications.</strong> A better or cheaper model appears and adopting it means touching every codebase that calls the old one. The cost of the switch is what stops the switch, so teams stay on whatever they started with.</p>
+<p><strong>There is no place to put a policy.</strong> PII redaction, rate limits, budget caps, an audit log, a model allow-list — each has to be implemented in every application, by every team, correctly. The next notebook walks past all of it.</p>
+<p><strong>Nobody can tell whether it is getting better.</strong> Quality is discussed anecdotally — someone saw a bad answer, someone else believes the new prompt helped. With no scores attached to real traffic there is no baseline to regress against, so prompt and model changes ship on conviction. And because nothing measures quality, nothing can act on it: routing stays a static config that cannot respond to a route getting worse.</p>
+<p>Each of these is the same problem: <strong>there is no single point every request passes through.</strong> The stack in this repo is the argument that creating one is the highest-leverage thing an enterprise can do early, because every other capability becomes available once it exists.</p>
+<p>The last one is also the reason the <em>same</em> point has to do both jobs. Measuring quality and deciding where a request goes are separate concerns right up until you want the first to change the second — and then they have to live together, or the loop cannot close. That is what <a href="../phases/#55-closing-the-loop-judge-scored-routing">Phase 5.5</a> builds, and why it is the destination rather than a late addition.</p>
+<hr />
+<h2 id="the-load-bearing-decision-a-gateway">The load-bearing decision: a gateway<a class="headerlink" href="#the-load-bearing-decision-a-gateway" title="Permanent link">&para;</a></h2>
+<p>There are three common places to put the abstraction over models. The choice determines what is possible later.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Per-app provider SDK</th>
+<th>Framework abstraction</th>
+<th><strong>Gateway</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Where model choice lives</td>
+<td>each codebase</td>
+<td>each codebase's framework config</td>
+<td>one config, centrally</td>
+</tr>
+<tr>
+<td>Cost attribution</td>
+<td>provider invoices</td>
+<td>none by default</td>
+<td>per request, per key, per model</td>
+</tr>
+<tr>
+<td>Tracing consistency</td>
+<td>per team, if any</td>
+<td>per framework</td>
+<td>uniform, framework-neutral</td>
+</tr>
+<tr>
+<td>Policy enforcement point</td>
+<td>none</td>
+<td>none</td>
+<td>one, unavoidable</td>
+</tr>
+<tr>
+<td>Cost of swapping models</td>
+<td>touch every app</td>
+<td>touch every app</td>
+<td>change one string</td>
+</tr>
+<tr>
+<td>Works for notebooks, cron, <code>curl</code></td>
+<td>separately</td>
+<td>no</td>
+<td>yes, same as apps</td>
+</tr>
+<tr>
+<td>Added failure domain</td>
+<td>none</td>
+<td>none</td>
+<td><strong>yes — one more hop</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The last row is the honest cost. A gateway is a component that can be down, and when it is down everything is down. That is a real trade, mitigated but not eliminated by retries, timeouts and fallbacks — all of which this stack configures explicitly in <code>layers.gateway.options</code>.</p>
+<p>The reason it is still worth it: the other three columns cannot be retrofitted. Cost attribution, uniform tracing and a policy enforcement point are properties of <em>where requests flow</em>, not features you can add to an application later. If the flow is already centralised, all three are configuration. If it is not, all three are a migration.</p>
+<div class="admonition note">
+<p class="admonition-title">Framework abstraction and a gateway are not competitors</p>
+<p>LangChain or LlamaIndex sitting <em>on top of</em> the gateway is a perfectly good arrangement, and this stack traces it identically to a raw SDK call — that is what "framework-neutral" means. The point is that the framework is the wrong layer to make the model choice and enforce policy at, because it only covers the applications that use it.</p>
+</div>
+<hr />
+<h2 id="why-observability-at-the-gateway-rather-than-in-the-app">Why observability at the gateway rather than in the app<a class="headerlink" href="#why-observability-at-the-gateway-rather-than-in-the-app" title="Permanent link">&para;</a></h2>
+<p>Application-level LLM tracing is the more common pattern, and it is genuinely better at one thing: it sees business context the gateway cannot — which user, which feature, which step of your own workflow.</p>
+<p>The gateway sees something different and, for this purpose, more useful: <strong>every request, from every client, in the same shape</strong>, whether that client is a production service, a notebook, a scheduled job or an agent framework nobody told you about. It also sees the failures, which app-level instrumentation frequently drops because the error path is not the path that got instrumented.</p>
+<p>The two compose. Pass your own identifiers through as metadata and you get both — the gateway's completeness plus your context. What you cannot do is start with app-level tracing and later derive fleet-wide cost and failure data from it.</p>
+<hr />
+<h2 id="what-each-layer-is-and-what-was-considered-instead">What each layer is, and what was considered instead<a class="headerlink" href="#what-each-layer-is-and-what-was-considered-instead" title="Permanent link">&para;</a></h2>
+<p>The layers are fixed; the implementations are swappable. Reasons for each current choice, and the honest trade in each case.</p>
+<h3 id="gateway-litellm">Gateway — LiteLLM<a class="headerlink" href="#gateway-litellm" title="Permanent link">&para;</a></h3>
+<p>An OpenAI-compatible proxy in front of every model, translating wire formats, routing aliases, tracking cost, issuing scoped keys.</p>
+<p><strong>Considered:</strong> hosted routers such as OpenRouter (removes the self-hosting requirement, but sends every prompt to a third party — a non-starter for the buyers this stack targets); commercial AI gateways like Portkey; API gateways with LLM plugins such as Kong; writing a thin proxy in-house.</p>
+<p><strong>Why LiteLLM:</strong> self-hostable and open source, so it can live inside a network boundary; broad provider coverage, so the abstraction does not leak the first time someone wants a new model; native Langfuse callbacks on both success <em>and</em> failure paths, which is what makes gateway-level tracing work without glue code; virtual keys and budgets built in, so the policy point is usable on day one.</p>
+<p><strong>The trade:</strong> it is a young, fast-moving project, and the surface area it covers — dozens of providers — is large enough that edge cases exist. <code>drop_params: true</code> in this stack's config exists precisely because providers disagree about parameters.</p>
+<h3 id="observability-langfuse">Observability — Langfuse<a class="headerlink" href="#observability-langfuse" title="Permanent link">&para;</a></h3>
+<p>Traces, sessions, cost, datasets, scores and evals in one place.</p>
+<p><strong>Considered:</strong> LangSmith (excellent, but SaaS-first and tied to the LangChain ecosystem); Arize Phoenix; Helicone; OpenLLMetry/OpenTelemetry-based setups feeding a generic backend.</p>
+<p><strong>Why Langfuse:</strong> it self-hosts, stores trace workloads in ClickHouse, and
+keeps datasets, scores, and evaluations beside the traces. That makes promoting
+a production trace into a later evaluation set practical.</p>
+<p><strong>The trade:</strong> self-hosting Langfuse is not one container. It needs
+ClickHouse, Postgres, Redis, an S3-compatible blob store, and a worker. That
+operational cost is visible even in the local demo.</p>
+<h3 id="serving-vllm">Serving — vLLM<a class="headerlink" href="#serving-vllm" title="Permanent link">&para;</a></h3>
+<p>The inference server for self-hosted models, exposing an OpenAI-compatible endpoint so the gateway treats it like any other provider.</p>
+<p><strong>Considered:</strong> Hugging Face TGI; SGLang; Ollama and llama.cpp (excellent for local development, not aimed at concurrent serving); NVIDIA Triton/TensorRT-LLM (faster ceiling, considerably more setup).</p>
+<p><strong>Why vLLM:</strong> continuous batching and paged attention give it strong throughput under concurrency, which is the regime that matters when a GPU is being paid for by the second; and its OpenAI-compatible server means the gateway needs no special case for it — a self-hosted model is configured exactly like a commercial one.</p>
+<h3 id="ui-librechat">UI — LibreChat<a class="headerlink" href="#ui-librechat" title="Permanent link">&para;</a></h3>
+<p>A chat front end so there is something to demo, and so non-developers can use the stack.</p>
+<p><strong>Considered:</strong> Open WebUI; Chainlit or Streamlit for a bespoke UI; no UI at all (the <code>headless</code> profile exists for that).</p>
+<p><strong>Why LibreChat:</strong> it is configured by a file rather than by clicking, so its model list can be generated from the same <code>stack.yaml</code> catalog as the gateway's routing table — no drift between what the UI offers and what the gateway can serve. It also supports agents and MCP tools, which is what <a href="../phases/#52-librechat-agents-over-the-mcp-tool-layer">Phase 5.2</a> builds on.</p>
+<h3 id="compute-runpod">Compute — RunPod<a class="headerlink" href="#compute-runpod" title="Permanent link">&para;</a></h3>
+<p>GPU hosting for the serving layer.</p>
+<p><strong>Considered:</strong> EC2/GCE GPU instances; Lambda Labs; on-premise GPUs; serverless inference APIs.</p>
+<p><strong>Why RunPod for this stack:</strong> per-second billing with no charge when a pod is stopped, and prebuilt vLLM templates, which together make the GPU half of the demo cheap and fast to stand up. For a reference architecture that gets brought up and torn down repeatedly, that matters more than committed-use discounts.</p>
+<p><strong>The trade, stated plainly:</strong> RunPod is not the likely production destination
+for a regulated enterprise. It is the planned way to prove the architecture
+with a real GPU. Moving serving to EC2 or on-premises remains a design goal,
+not a capability implemented in this repository.</p>
+<h3 id="tools-mcp-with-clickhouse-cloud-first">Tools — MCP, with ClickHouse Cloud first<a class="headerlink" href="#tools-mcp-with-clickhouse-cloud-first" title="Permanent link">&para;</a></h3>
+<p><strong>MCP</strong> (Model Context Protocol) is an open protocol for exposing tools, data sources and prompts to language models over a uniform interface. Before it, every framework had its own tool-calling convention and every integration was bespoke. MCP makes a tool server reusable across clients — the same reason the gateway argument works, applied to tools instead of models.</p>
+<p>Here it means agents reach the warehouse through a declared, scoped server rather than through code embedded in an application — and because the calls pass through the gateway, they are traced alongside the completions that triggered them.</p>
+<hr />
+<h2 id="why-clickhouse-is-under-langfuse">Why ClickHouse is under Langfuse<a class="headerlink" href="#why-clickhouse-is-under-langfuse" title="Permanent link">&para;</a></h2>
+<p>Worth understanding rather than taking on faith, because it is also the closing argument of the <a href="../demo-flow/#4-close-why-clickhouse-1-min">demo</a>.</p>
+<p>LLM tracing has an unusual workload shape:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>What it looks like here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Write pattern</td>
+<td>append-heavy, effectively never updated</td>
+</tr>
+<tr>
+<td>Cardinality</td>
+<td>very high — every trace, span and session has a unique ID</td>
+</tr>
+<tr>
+<td>Schema</td>
+<td>wide and semi-structured; arbitrary user metadata per trace</td>
+</tr>
+<tr>
+<td>Read pattern</td>
+<td>aggregate over wide time ranges — p95 latency, cost per model per day, token totals</td>
+</tr>
+<tr>
+<td>Row counts</td>
+<td>thousands per minute at modest production volume</td>
+</tr>
+</tbody>
+</table>
+<p>A row-oriented transactional database is built for the opposite of most of that. It can hold the data, and Langfuse v2 did exactly that in Postgres — but the aggregate-on-read queries that make the dashboard useful scan far more data than they return, and that is where a row store spends its time reading columns nobody asked for.</p>
+<p>A column-oriented OLAP store reads only the columns in the query and is
+designed for append-then-aggregate workloads. Langfuse therefore uses
+ClickHouse for traces and Postgres for transactional metadata.</p>
+<hr />
+<h2 id="regulatory-context-and-isms-p">Regulatory context — 망분리 and ISMS-P<a class="headerlink" href="#regulatory-context-and-isms-p" title="Permanent link">&para;</a></h2>
+<p>This stack's self-hosting emphasis is not a preference. For a meaningful set of Korean enterprises, calling a commercial LLM API from an internal network is not a thing they are permitted to do.</p>
+<div class="admonition warning">
+<p class="admonition-title">Orientation, not legal advice</p>
+<p>This section exists so the architecture's shape makes sense. Thresholds, scope and interpretation change, and they turn on specifics of a given organisation. Confirm anything load-bearing with your own compliance function.</p>
+</div>
+<h3 id="network-separation">망분리 — network separation<a class="headerlink" href="#network-separation" title="Permanent link">&para;</a></h3>
+<p><strong>What it is.</strong> A requirement to keep internal business networks separated from the internet, so that a compromise of one does not reach the other. It shows up in the financial sector through the 전자금융감독규정 (Regulation on Supervision of Electronic Financial Transactions) and in the public sector through government security guidance.</p>
+<p>Implementations take two broad forms — <strong>물리적 망분리</strong>, where internal work happens on machines with no internet path at all, and <strong>논리적 망분리</strong>, where the separation is enforced through virtualisation.</p>
+<p><strong>Why it decides this architecture.</strong> In a separated environment there is no route from the internal network to <code>api.openai.com</code>. This is not a matter of a firewall rule someone could be persuaded to add — the absence of that route <em>is</em> the control. So for these buyers:</p>
+<ul>
+<li>Phase 1 of this stack, which sends every request to a commercial API, <strong>cannot run inside the boundary at all</strong></li>
+<li>the model has to be served inside the boundary, which is what <a href="../phases/#phase-3--cpu-serving-and-minio-kv-cache">Phase 3</a> (CPU) and <a href="../phases/#phase-4--gpu-serving-on-runpod">Phase 4</a> (GPU) are for</li>
+<li>the observability stack has to be self-hosted too, since traces contain the prompts</li>
+<li><code>--profile airgapped</code> <strong>prunes</strong> commercial fallbacks from the generated config rather than merely disabling them — because in this context "we configured it not to" is a promise, not a control</li>
+</ul>
+<p>That last distinction is the one worth carrying into a compliance conversation. A config that <em>could</em> egress and is set not to, and a config in which the egress path does not exist, are different artifacts. This stack generates the second.</p>
+<h3 id="isms-p-the-certification">ISMS-P — the certification<a class="headerlink" href="#isms-p-the-certification" title="Permanent link">&para;</a></h3>
+<p><strong>What it is.</strong> 정보보호 및 개인정보보호 관리체계 (ISMS-P) is Korea's combined certification for information security and personal information protection management, administered under KISA. It extends the security-only ISMS scheme with personal-data controls. Certification is mandatory for certain categories of operator, with the categories keyed to things like sector, revenue and user counts.</p>
+<p><strong>Which parts this stack touches.</strong> An LLM deployment is not a special case; it inherits the ordinary control domains, and this repo's structure maps onto several of them:</p>
+<table>
+<thead>
+<tr>
+<th>Control area</th>
+<th>What the stack does about it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Access control</td>
+<td>virtual keys per team through the gateway; a dedicated read-only warehouse user for the MCP server rather than a shared admin account</td>
+</tr>
+<tr>
+<td>Credential management</td>
+<td>every secret inventoried in one file with owner, scope and rotation cadence — see <a href="../credentials/">Credentials</a></td>
+</tr>
+<tr>
+<td>Operational logging</td>
+<td>every request traced with prompt, completion, latency, cost and outcome, including failures</td>
+</tr>
+<tr>
+<td>Third-party / outsourcing</td>
+<td>the model catalog makes explicit which models are commercial APIs and which run inside the boundary</td>
+</tr>
+<tr>
+<td>Cross-border transfer</td>
+<td>see below — the sharpest one</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-cross-border-question">The cross-border question<a class="headerlink" href="#the-cross-border-question" title="Permanent link">&para;</a></h3>
+<p>This is the point that most often surprises teams, and it is worth stating on its own.</p>
+<p>A prompt is data. If a prompt contains personal information and the request goes to a provider outside Korea, that is a <strong>cross-border transfer of personal data (개인정보 국외이전)</strong> under 개인정보보호법 (PIPA), with its own consent and disclosure obligations. It does not stop being one because the transfer happened inside an LLM call rather than a database export.</p>
+<p>Two consequences for how this stack is built:</p>
+<ol>
+<li><strong>Guardrails have to run before egress.</strong> A PII filter that runs on the response has already sent the prompt. This is why <a href="../phases/#54-guardrails-at-the-gateway">Phase 5.4</a> treats the <code>pre_call</code> versus <code>post_call</code> distinction as the whole point rather than a detail.</li>
+<li><strong>A hosted guardrail service can reintroduce the problem it was added to solve.</strong> Sending prompts to a third-party API to be <em>checked</em> for sensitive data is still sending them to a third party. If the deployment claims a boundary, the guardrail has to be inside it.</li>
+</ol>
+<hr />
+<h2 id="glossary">Glossary<a class="headerlink" href="#glossary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gateway</td>
+<td>The shared OpenAI-compatible model endpoint; LiteLLM in this stack</td>
+</tr>
+<tr>
+<td>Model alias</td>
+<td>A stable client-facing name mapped to a provider model</td>
+</tr>
+<tr>
+<td>Virtual key</td>
+<td>A gateway-issued consumer key with attribution and limits</td>
+</tr>
+<tr>
+<td>Trace / span</td>
+<td>One logical operation / one step within it</td>
+</tr>
+<tr>
+<td>Context window</td>
+<td>The maximum input and output token capacity of a model</td>
+</tr>
+<tr>
+<td>Prefix caching</td>
+<td>Reusing attention state for an identical prompt prefix</td>
+</tr>
+<tr>
+<td>Semantic cache</td>
+<td>Reusing a completed answer for a similar prompt; a different mechanism</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td>A protocol for exposing tools and data to model clients</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>If you want to</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Understand the build order and what each phase proves</td>
+<td><a href="../phases/">Build-out phases</a></td>
+</tr>
+<tr>
+<td>See how one file describes the whole stack</td>
+<td><a href="../configuration/">Configuration</a></td>
+</tr>
+<tr>
+<td>Prepare and run it</td>
+<td><a href="../getting-started/">Getting started</a></td>
+</tr>
+<tr>
+<td>Know which keys exist and how they are handled</td>
+<td><a href="../credentials/">Credentials</a></td>
+</tr>
+<tr>
+<td>Present it</td>
+<td><a href="../demo-flow/">Demo flow</a></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../workshop/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Phase 1 workshop">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Phase 1 workshop
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../phases/" class="md-footer__link md-footer__link--next" aria-label="Next: Build-out phases">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Build-out phases
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT licensed. Built on open infrastructure.
+    </div>
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/litkhai/llmops-in-a-box" target="_blank" rel="noopener" title="Source on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.tracking", "navigation.top", "navigation.footer", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.action.edit", "content.tooltips", "search.highlight", "search.share", "search.suggest", "toc.follow", "toc.integrate"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+    
+  </body>
+</html>

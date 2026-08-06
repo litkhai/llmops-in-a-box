@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="LLMOps in a Box">
+  <!-- Same 3-2-1 net as the favicon, scaled ~8% larger than the favicon's
+       geometry because there is no plate here to pay padding for.
+
+       White is hardcoded rather than currentColor. Material injects the logo
+       as <img src="...">, and an SVG loaded through <img> has no parent
+       styling context, so currentColor resolves to its initial value —
+       black — not the header's foreground. On this theme's black header that
+       renders the mark invisible. Both places the logo appears (desktop
+       header, mobile drawer title) sit on the primary foreground colour,
+       which is black in both the slate and default schemes, so a fixed white
+       is correct for both rather than something to adapt per scheme.
+       (Note for future edits: an XML comment cannot contain a double hyphen,
+       so CSS custom property names cannot be written out in here.)
+
+       Heavier strokes than a plain scale-up would give: at the header's 24px
+       the edges are the first thing to disappear, and without them the mark
+       reads as scattered dots rather than a network. -->
+  <g stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" opacity="0.85">
+    <path d="M5.1 6.5  L15.7 11.0"/><path d="M5.1 6.5  L15.7 21.0"/>
+    <path d="M5.1 16   L15.7 11.0"/><path d="M5.1 16   L15.7 21.0"/>
+    <path d="M5.1 25.5 L15.7 11.0"/><path d="M5.1 25.5 L15.7 21.0"/>
+    <path d="M15.7 11.0 L25.7 16"/><path d="M15.7 21.0 L25.7 16"/>
+  </g>
+
+  <g fill="#ffffff">
+    <circle cx="5.1"  cy="6.5"  r="2.8"/>
+    <circle cx="5.1"  cy="16"   r="2.8"/>
+    <circle cx="5.1"  cy="25.5" r="2.8"/>
+    <circle cx="15.7" cy="11.0" r="2.8"/>
+    <circle cx="15.7" cy="21.0" r="2.8"/>
+    <circle cx="25.7" cy="16"   r="3.9"/>
+  </g>
+</svg>
