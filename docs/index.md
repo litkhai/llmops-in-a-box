@@ -203,7 +203,7 @@ without rewriting the ones already there.
 ### A single request, end to end
 
 1. A user sends a message in LibreChat (or any OpenAI-compatible client) and
-   picks a model — `gpt-4o`, `claude-sonnet`, `qwen-0.5b` (Phase 3 CPU), or `qwen-7b` (Phase 4 GPU).
+   picks a model — `claude-sonnet`, `qwen-7b` (RunPod Serverless / Phase 4 GPU), or `qwen-0.5b` (Phase 3 CPU).
    Selecting `auto` activates language-aware routing at the gateway.
 2. LiteLLM receives it on **one unified endpoint**, resolves the model alias,
    and routes it to the right provider. Anthropic's format translation is

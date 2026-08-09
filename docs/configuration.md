@@ -69,8 +69,8 @@ layers:
     options:
       master_key_env: LITELLM_MASTER_KEY
       callbacks:
-        success: [langfuse]
-        failure: [langfuse]
+        success: []
+        failure: []
 ```
 
 | Key | Meaning |
@@ -172,13 +172,12 @@ layers
   ui             librechat    compose    ui
 
 compose profiles  gateway obs ui
-models            gpt-4o claude-sonnet
+models            claude-sonnet
 ```
 
 ```console
 $ ./scripts/stack.sh models
 ALIAS           TIER         LITELLM_MODEL                          IN/1k      OUT/1k
-gpt-4o          commercial   openai/gpt-4o                          0.0025     0.01
 claude-sonnet   commercial   anthropic/claude-sonnet-4-5            0.003      0.015
 ```
 
@@ -219,7 +218,7 @@ flowchart TD
     LC["LibreChat"]
     G["LiteLLM Gateway\n(UnifiedRouter callback)"]
     LF["Langfuse"]
-    GPT["gpt-4o\n(OpenAI)"]
+    QW["qwen-7b\n(RunPod)"]
     CS["claude-sonnet\n(Anthropic)"]
     CF["Cloudflare Workers AI\nFLUX.1-schnell"]
     MN["MinIO\n(media.<domain>)"]
@@ -228,10 +227,10 @@ flowchart TD
 
     G -- "image keywords detected" --> CF
     CF -- "store" --> MN
-    G -- "English (Latin script)" --> GPT
-    G -- "Korean / non-Latin" --> CS
+    G -- "English / CJK" --> QW
+    G -- "Korean (Hangul)" --> CS
 
-    G -- "success + failure traces" --> LF
+    G -- "traces (completion calls only)" --> LF
 ```
 
 The chat path and the image path share the same gateway endpoint and the same
@@ -245,14 +244,17 @@ LiteLLM routes chat requests automatically by the dominant script of the last us
 
 | Detected script | Target model |
 |---|---|
-| Latin (English, etc.) | `gpt-4o` |
-| Non-Latin (Korean, Chinese, Japanese, …) | `claude-sonnet` |
+| Hangul (Korean) | `claude-sonnet` |
+| CJK (Chinese, Japanese) | `qwen-7b` |
+| Latin (English, etc.) | `qwen-7b` |
 
 Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
 
-The router only rewrites the `model` field when the client sends `"gpt-4o"`, `"claude-sonnet"`, `"auto"`, or an empty string. Any other value is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely.
+The router only rewrites the `model` field when the client sends `"auto"` or an empty string. Any other value (e.g. `"claude-sonnet"`) is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely.
 
-**Fallback:** `claude-sonnet → gpt-4o` and `gpt-4o → claude-sonnet`. If one provider is unavailable, LiteLLM retries on the other. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
+**Fallback:** `qwen-7b → claude-sonnet`. When the RunPod pod is cold or unavailable, LiteLLM falls back to `claude-sonnet` automatically. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
+
+**Langfuse spans:** The `async_log_success_event` callback logs to Langfuse only for `completion` and `acompletion` call types — management API calls (`/v2/user/info`, etc.) are skipped to avoid noise traces. Each trace may contain two types of child spans: a `routing` span recording the detected script and routed model; and `tool-result/[tool_name]` spans emitted when LibreChat runs MCP tool calls in its agentic loop, each carrying the `tool_call_id` and response content.
 
 The routing logic lives in `docker/litellm_callbacks.py` as a `CustomLogger` pre-call hook and is controlled by `stack.yaml`:
 
@@ -262,15 +264,14 @@ layers:
     options:
       language_routing:
         enabled: true
-        english_model: gpt-4o
-        multilingual_model: claude-sonnet
+        english_model: qwen-7b
+        multilingual_model: claude-sonnet  # Korean
+        cjk_model: qwen-7b
         threshold: 0.15
       routing:
         fallbacks:
-          - from: gpt-4o
+          - from: qwen-7b
             to: [claude-sonnet]
-          - from: claude-sonnet
-            to: [gpt-4o]
           - from: auto
             to: [claude-sonnet]
 ```
@@ -352,9 +353,7 @@ flowchart LR
     GW -. "tool call traces" .-> LF["Langfuse"]
 ```
 
-The `mcp-clickhouse` container exposes an SSE endpoint on port 9100. That port
-is **internal to the Docker network only** — no security group change is
-needed for the aws-ec2 target.
+`mcp-clickhouse` only supports stdio transport natively. The `docker/mcp/Dockerfile` wraps it with `mcp-proxy`, which exposes an SSE endpoint on port 9100 inside the Docker network. That port is **internal to the Docker network only** — no security group change is needed for the aws-ec2 target. LibreChat's SSRF protection is bypassed for this internal address by the `mcpSettings.allowedAddresses` entry that `render` adds to `docker/librechat.yaml`.
 
 ### stack.yaml — tools layer
 
@@ -387,11 +386,24 @@ profiles:
 `render --profile phase-2` appends the `mcp_servers` block to the generated
 `docker/litellm_config.yaml`:
 
-```yaml
+```yaml title="docker/litellm_config.yaml (excerpt)"
 mcp_servers:
-  - server_name: "clickhouse"
-    server_path_or_url: "http://mcp-clickhouse:9100/sse"
+  clickhouse:
+    url: "http://mcp-clickhouse:9100/sse"
     transport: "sse"
+```
+
+`render` also adds the following block to `docker/librechat.yaml` to exempt the internal Docker hostname from LibreChat's SSRF protection:
+
+```yaml title="docker/librechat.yaml (excerpt)"
+mcpSettings:
+  allowedAddresses:
+    - "mcp-clickhouse:9100"
+
+mcpServers:
+  clickhouse:
+    type: sse
+    url: "http://mcp-clickhouse:9100/sse"
 ```
 
 ### Deploying Phase 2
@@ -487,17 +499,23 @@ targets:
 # profile: phase-1
 
 model_list:
-  - model_name: gpt-4o
+  - model_name: claude-sonnet
     litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
       rpm: 500
-      tpm: 800000
+      tpm: 400000
+      timeout: 5
     model_info:
       mode: chat
-      max_input_tokens: 128000
-      input_cost_per_token: 2.5e-06
-      output_cost_per_token: 1e-05
+      max_input_tokens: 200000
+      input_cost_per_token: 3e-06
+      output_cost_per_token: 1.5e-05
+  - model_name: auto
+    litellm_params:
+      model: qwen-7b
+    model_info:
+      mode: chat
 ```
 
 They are committed anyway, so a reader can see the gateway config without running anything. Use `--no-render` for a one-off manual override.

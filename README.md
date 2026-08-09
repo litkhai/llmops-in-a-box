@@ -89,8 +89,8 @@ LibreChat / applications
                ▼
 LiteLLM Gateway ──────────── traces ─────────▶ Langfuse
 (UnifiedRouter callback)                           │
-        │                                       ClickHouse · Postgres
-        ├─ auto · English text  ──▶ gpt-4o        Redis · MinIO
+        │                                       ClickHouse · Postgres · Redis · MinIO
+        ├─ auto · English/CJK text ──▶ qwen-7b (RunPod Serverless)
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
         │                  stores ─▶ MinIO → media.<domain>
@@ -102,16 +102,19 @@ LiteLLM Gateway ──────────── traces ──────�
 ```
 
 Phase 1 runs today. One model alias (`auto`) in the chat UI routes to the right
-provider: English text → gpt-4o, Korean → claude-sonnet, image-intent messages
-→ Cloudflare Workers AI FLUX.1-schnell — all via a single
-`UnifiedRouter` callback, all emitting traces to Langfuse.
+provider: English/CJK text → qwen-7b (RunPod Serverless), Korean → claude-sonnet,
+image-intent messages → Cloudflare Workers AI FLUX.1-schnell — all via
+`UnifiedRouter`, which logs completion calls to Langfuse via the custom SDK
+(routing decisions and MCP tool-result spans included).
 
 Phase 2 is also runnable. ClickHouse Cloud is exposed as an MCP server wired
 directly into the LiteLLM gateway, so every tool call is traced alongside the
 model calls that triggered it. No client-side wiring required.
 
 Applications use one OpenAI-compatible endpoint. LiteLLM resolves the model
-alias and sends success and failure telemetry to Langfuse. The model catalog is
+alias; `UnifiedRouter` logs completion calls directly to Langfuse via the SDK,
+so only meaningful model calls appear in traces rather than management API noise.
+The model catalog is
 rendered from `stack.yaml` into both LiteLLM and LibreChat configuration.
 Adding a later layer changes gateway configuration, not client code.
 

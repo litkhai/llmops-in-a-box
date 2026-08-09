@@ -88,9 +88,10 @@ Phase 1 stack.
 ??? failure "Custom callback not loading — `UnifiedRouter` never runs"
     **Symptom:** LiteLLM startup log shows:
     ```
-    Initialized Success Callbacks - ['langfuse']
+    Initialized Success Callbacks - []
     ```
-    The `UnifiedRouter` callback is never invoked.
+    `UnifiedRouter` is never invoked even though `callbacks.py` is mounted.
+    Langfuse traces are absent for completion calls.
 
     **Cause:** LiteLLM proxy silently ignores the `custom_callbacks` key in
     `litellm_settings`. Only the `callbacks` key is honoured.
@@ -101,10 +102,18 @@ Phase 1 stack.
     ```yaml title="docker/litellm_config.yaml"
     litellm_settings:
       callbacks: [callbacks.language_router]
+      success_callback: []
     ```
 
     The callback module is `callbacks.py` (mounted at `/app/callbacks.py`) and
     `language_router` is the `UnifiedRouter()` instance at module level.
+
+    `success_callback` is intentionally empty. Langfuse logging is performed
+    manually inside `UnifiedRouter.async_log_success_event` via the Langfuse
+    SDK, filtered to completion calls only. Adding `langfuse` to
+    `success_callback` causes LiteLLM to log all management API calls
+    (e.g. `/v2/user/info`, `/videos/{video_id}`) as traces with
+    `"default-message-value"` placeholder inputs.
 
 ??? failure "`async_pre_call_hook` never called for LibreChat requests"
     **Symptom:** The hook is defined and the module loads successfully, but the
@@ -178,8 +187,8 @@ Phase 1 stack.
     the stdio-only server over SSE:
 
     ```dockerfile
-    CMD ["mcp-proxy", "--port", "9100", "--", \
-         "python", "-m", "mcp_clickhouse"]
+    CMD ["mcp-proxy", "--port", "9100", "--host", "0.0.0.0", \
+         "--pass-environment", "mcp-clickhouse"]
     ```
 
     Rebuild the image:
@@ -207,6 +216,30 @@ Phase 1 stack.
 
     ```bash
     grep -A5 mcp_servers docker/litellm_config.yaml
+    ```
+
+??? failure "LibreChat cannot reach `mcp-clickhouse` — SSRF protection blocks internal addresses"
+    **Symptom:** MCP tools never appear in LibreChat, or tool calls return a
+    connection error. LibreChat logs show an SSRF-related rejection.
+
+    **Cause:** LibreChat's built-in SSRF protection blocks requests to private
+    or Docker-internal network addresses. The MCP server runs at
+    `http://mcp-clickhouse:9100/sse`, which is an internal hostname and is
+    blocked by default.
+
+    **Fix:** Add the MCP server hostname to `mcpSettings.allowedAddresses` in
+    `librechat.yaml`:
+
+    ```yaml title="docker/librechat.yaml"
+    mcpSettings:
+      allowedAddresses:
+        - "mcp-clickhouse"
+    ```
+
+    Recreate the LibreChat container to pick up the change:
+
+    ```bash
+    docker compose up -d --no-deps librechat
     ```
 
 ??? failure "Tool calls fail — ClickHouse connection refused or authentication error"
@@ -250,3 +283,30 @@ Phase 1 stack.
     See [Deployment — Troubleshooting](deployment.md#troubleshooting) for the
     full fix. Short version: add `auto` to the fallback list in `stack.yaml`
     under `layers.gateway.options.routing.fallbacks`, then re-render.
+
+??? failure "Traces show `default-message-value` as the user input"
+    **Symptom:** Langfuse contains traces with `"default-message-value"` as the
+    input. They often correspond to management API paths such as
+    `/v2/user/info` or `/videos/{video_id}` rather than chat completions.
+
+    **Cause:** When `success_callback: [langfuse]` is set, LiteLLM forwards
+    **every** successful call — including internal management API calls — to
+    Langfuse. Those requests carry no chat messages, so LiteLLM substitutes a
+    `"default-message-value"` placeholder.
+
+    **Fix:** Remove `langfuse` from `success_callback` and rely on
+    `UnifiedRouter.async_log_success_event` to log to Langfuse via the SDK.
+    The custom handler filters to completion calls only, so management API
+    traffic is never forwarded:
+
+    ```yaml title="docker/litellm_config.yaml"
+    litellm_settings:
+      callbacks: [callbacks.language_router]
+      success_callback: []
+    ```
+
+    Confirm via the LiteLLM startup log:
+    ```
+    Initialized Success Callbacks - []
+    ```
+    After the fix, only actual chat completion requests appear in Langfuse.

@@ -63,7 +63,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model="auto",
     messages=[
         {"role": "user", "content": "Explain ClickHouse in one sentence."}
     ],
@@ -71,7 +71,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-Use `claude-sonnet` instead if only Anthropic is configured.
+`auto` routes to `qwen-7b` (English/CJK) or `claude-sonnet` (Korean) automatically. Use `claude-sonnet` directly to bypass routing.
 
 **Checkpoint:** open Langfuse → **Tracing**. The request should contain the
 prompt, completion, latency, token counts, and computed cost. The client code
@@ -82,7 +82,7 @@ contains no Langfuse integration; LiteLLM emitted the trace.
 If both provider keys are configured:
 
 ```python
-for model in ["gpt-4o", "claude-sonnet"]:
+for model in ["qwen-7b", "claude-sonnet"]:
     response = client.chat.completions.create(
         model=model,
         messages=[

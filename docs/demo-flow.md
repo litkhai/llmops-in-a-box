@@ -73,7 +73,7 @@ for lang, msg in [
 
 **Talking points**
 
-- One endpoint, one SDK, one model alias. The gateway detects script and routes: Latin → GPT-4o, non-Latin → Claude Sonnet.
+- One endpoint, one SDK, one model alias. The gateway detects script and routes: Latin/CJK → qwen-7b, Korean → claude-sonnet.
 - Applications do not change when models do. That is the migration story in one line.
 - Fallback is automatic: if one provider is unavailable, LiteLLM retries on the other. The client always gets a response.
 
@@ -107,9 +107,9 @@ Open Langfuse. Spend the most time here.
 | Show | Say |
 |---|---|
 | **Traces** list | Every request — chat and image, both providers — in one pane. Nothing was instrumented in the application. |
-| A chat trace | Full prompt and completion, latency, token counts, **computed cost**. |
+| A chat trace | Full prompt and completion, latency, token counts, **computed cost**. Every trace includes a `routing` child span showing the language detection decision and selected model alongside the LLM generation span. |
 | An image trace | Same trace format; `model` shows `claude-sonnet` (the 1-token placeholder call used while image generates in background), making the routing decision visible. |
-| The language routing trace | `model` shows `gpt-4o` or `claude-sonnet` — the gateway's routing decision is captured, not just the response. |
+| The language routing trace | `model` shows `qwen-7b` or `claude-sonnet` — the gateway's routing decision is captured, not just the response. |
 | Model comparison | Cost and latency side by side — this is what makes self-hosted vs. API economics decidable rather than theoretical. |
 | The error trace | Failures are traced too. Most observability setups only capture successes; you find out about failures from users. |
 | **Sessions** | Multi-turn conversations grouped, not scattered across unrelated traces. |
@@ -148,9 +148,7 @@ tool call:
 ClickHouse에 어떤 테이블들이 있어?
 ```
 
-In Langfuse, the trace now contains both the model call and the tool call
-(arguments, SQL, result, latency) as sibling spans — no client-side wiring
-needed.
+In Langfuse, the trace now contains the `routing` span, the LLM generation span, and `tool-result/[name]` spans for each MCP tool result in the agentic loop — all as sibling spans, with no client-side wiring needed.
 
 **Talking point:** the gateway traces every request path identically. Adding a
 tool server changes what the model can do; the trace pipeline doesn't change at

@@ -332,7 +332,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model="auto",
     messages=[{"role": "user", "content": "Hello"}],
 )
 ```
@@ -413,8 +413,8 @@ gateway configuration, not the client protocol.
     v2 to v3, which uses the new v4 ingestion path.
 
 ??? question "`No fallback model group found for original model_group=auto`"
-    The language-routing callback rewrites `auto` to `gpt-4o` (English) or
-    `claude-sonnet` (Korean/multilingual) before the request is dispatched.
+    The language-routing callback rewrites `auto` to `qwen-7b` (English/CJK) or
+    `claude-sonnet` (Korean) before the request is dispatched.
     When that model then fails, LiteLLM looks up the fallback for the
     **original** model group (`auto`), not the rewritten one. Without an
     entry for `auto` in the fallback list, no recovery occurs.
@@ -439,13 +439,13 @@ gateway configuration, not the client protocol.
     `--transport sse` as a CLI flag. Use the `mcp-proxy` wrapper approach or
     pin to a version that supports SSE transport.
 
-    **Fix:** Check the `docker/mcp/Dockerfile` entrypoint. If the package
-    does not support `--transport sse`, install `mcp-proxy` and wrap the
-    stdio server:
+    **Fix:** Check the `docker/mcp/Dockerfile` entrypoint. Use the `mcp-proxy`
+    wrapper to expose the stdio-only server over SSE and pass environment
+    variables through to the subprocess:
 
     ```dockerfile
-    CMD ["mcp-proxy", "--port", "9100", "--", \
-         "python", "-m", "mcp_clickhouse"]
+    CMD ["mcp-proxy", "--port", "9100", "--host", "0.0.0.0", \
+         "--pass-environment", "mcp-clickhouse"]
     ```
 
     Then rebuild: `docker compose build mcp-clickhouse`.

@@ -70,7 +70,7 @@ An OpenAI-compatible proxy in front of every model, translating wire formats, ro
 
 **Considered:** hosted routers such as OpenRouter (removes the self-hosting requirement, but sends every prompt to a third party — a non-starter for the buyers this stack targets); commercial AI gateways like Portkey; API gateways with LLM plugins such as Kong; writing a thin proxy in-house.
 
-**Why LiteLLM:** self-hostable and open source, so it can live inside a network boundary; broad provider coverage, so the abstraction does not leak the first time someone wants a new model; native Langfuse callbacks on both success *and* failure paths, which is what makes gateway-level tracing work without glue code; virtual keys and budgets built in, so the policy point is usable on day one.
+**Why LiteLLM:** self-hostable and open source, so it can live inside a network boundary; broad provider coverage, so the abstraction does not leak the first time someone wants a new model; Langfuse SDK integration in the custom callback, logging completion calls only — which is what makes gateway-level tracing work without glue code while keeping management API noise out of traces; virtual keys and budgets built in, so the policy point is usable on day one.
 
 **The trade:** it is a young, fast-moving project, and the surface area it covers — dozens of providers — is large enough that edge cases exist. `drop_params: true` in this stack's config exists precisely because providers disagree about parameters.
 

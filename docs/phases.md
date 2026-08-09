@@ -158,8 +158,7 @@ headroom for the rest of the stack on a `t3.xlarge`. Larger quantized models
 
 Acceptance criteria:
 
-- `qwen-0.5b` responds through the LiteLLM gateway alongside `gpt-4o` and
-  `claude-sonnet`
+- `qwen-0.5b` responds through the LiteLLM gateway alongside `claude-sonnet`
 - no GPU pod required
 - CPU model appears in Langfuse traces with zero marginal cost
 - `--profile airgapped` resolves to a working stack using only `qwen-0.5b`
@@ -208,14 +207,14 @@ route it to the EC2 instance's MinIO over the internet.
 
 Acceptance criteria:
 
-- `gpt-4o`, `claude-sonnet`, `qwen-0.5b`, and `qwen-7b` use the same client
+- `claude-sonnet`, `qwen-0.5b`, and `qwen-7b` use the same client
   protocol and all appear in one Langfuse project
 - GPU runtime cost is reported separately from Langfuse's per-token data
 - Phase 3 layers continue to function when the RunPod pod is not running
 
-`qwen-7b` can fall back to `gpt-4o` in connected profiles. The renderer must
-prune that fallback in `airgapped`; a stopped remote model should fail rather
-than silently egress.
+`qwen-7b` can fall back to `claude-sonnet` in connected profiles (600 s timeout
+accounts for RunPod cold start). The renderer must prune that fallback in
+`airgapped`; a stopped remote model should fail rather than silently egress.
 
 ## Phase 5 — Operating recipes
 
@@ -233,7 +232,7 @@ request through context-window fallbacks.
 ```yaml
 router_settings:
   context_window_fallbacks:
-    - qwen-7b: [gpt-4o]
+    - qwen-7b: [claude-sonnet]
 ```
 
 When intent becomes important, add a classifier before normal routing:
@@ -339,7 +338,7 @@ Acceptance criteria:
 
 | Profile | Layers | Models |
 |---|---|---|
-| `phase-1` | gateway, observability, UI | `gpt-4o`, `claude-sonnet` |
+| `phase-1` | gateway, observability, UI | `claude-sonnet` |
 | `phase-2` | Phase 1 + tools | frontier models |
 | `phase-3` | Phase 2 + CPU serving + storage + KV cache | frontier models + `qwen-0.5b` |
 | `phase-4` | Phase 3 + GPU serving (RunPod) | all |
