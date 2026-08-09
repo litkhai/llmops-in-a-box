@@ -296,6 +296,11 @@ services:
       LANGFUSE_HOST: ${LITELLM_LANGFUSE_HOST:-http://langfuse-web:3000}
       LANGFUSE_TRACING_ENVIRONMENT: ${LANGFUSE_TRACING_ENVIRONMENT:-demo}
 
+      # Self-hosted GPU serving (RunPod Serverless vLLM — Phase 4).
+      # Leave blank on Phase 1/2/3 deployments; qwen-7b will fail at request time.
+      VLLM_API_BASE: ${VLLM_API_BASE:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
+
       # Image generation — Cloudflare Workers AI (optional; leave blank to disable).
       CF_API_TOKEN: ${CF_API_TOKEN:-}
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
