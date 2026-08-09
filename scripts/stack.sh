@@ -219,7 +219,7 @@ target_host() {
 #  render — model catalog -> litellm_config.yaml + librechat.yaml
 # ═════════════════════════════════════════════════════════════════════════════
 render_litellm() {
-  local out banner a model base key rpm tpm ctx ci co in_tok out_tok
+  local out banner a model base key rpm tpm ctx ci co in_tok out_tok model_timeout
   out="$REPO_ROOT/$(qs '.render.files.litellm')"
   banner="$(qs '.render.banner')"
   mkdir -p "$(dirname "$out")"
@@ -239,6 +239,7 @@ render_litellm() {
       ctx="$(model_field "$a" '.context_window')"
       ci="$(model_field "$a" '.cost_per_1k.input')"
       co="$(model_field "$a" '.cost_per_1k.output')"
+      model_timeout="$(model_field "$a" '.timeout_s')"
 
       # stack.yaml carries USD per 1k tokens; LiteLLM wants per-token.
       in_tok="$(awk -v c="${ci:-0}" 'BEGIN{printf "%.12g", c/1000}')"
@@ -255,7 +256,7 @@ render_litellm() {
       [ -n "$key" ]  && printf '      api_key: os.environ/%s\n'  "$key"
       [ -n "$rpm" ]  && printf '      rpm: %s\n' "$rpm"
       [ -n "$tpm" ]  && printf '      tpm: %s\n' "$tpm"
-      printf '      timeout: %s\n' "$(qs '.layers.gateway.options.request_timeout_s')"
+      printf '      timeout: %s\n' "${model_timeout:-$(qs '.layers.gateway.options.request_timeout_s')}"
       printf '    model_info:\n'
       printf '      mode: chat\n'
       [ -n "$ctx" ] && printf '      max_input_tokens: %s\n' "$ctx"
@@ -990,7 +991,7 @@ classify_credential_technology() {
     CF_API_TOKEN|CF_ACCOUNT_ID)
       CREDENTIAL_GROUP_ID="image-gen"; CREDENTIAL_GROUP_NAME="Image generation (Cloudflare Workers AI)" ;;
     RUNPOD_*|VLLM_*)
-      CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM (Phase 3)" ;;
+      CREDENTIAL_GROUP_ID="serving"; CREDENTIAL_GROUP_NAME="RunPod / vLLM (Phase 4)" ;;
     AWS_*)
       CREDENTIAL_GROUP_ID="aws"; CREDENTIAL_GROUP_NAME="AWS authentication / EC2" ;;
     DOMAIN_*)

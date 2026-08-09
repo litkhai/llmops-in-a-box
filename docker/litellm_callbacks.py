@@ -43,7 +43,8 @@ import litellm
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 _ENGLISH_MODEL      = "gpt-4o"
-_MULTILINGUAL_MODEL = "claude-sonnet"
+_MULTILINGUAL_MODEL = "claude-sonnet"   # Hangul (Korean)
+_CJK_MODEL          = "qwen-7b"         # CJK (Chinese, Japanese)
 _IMAGE_MODEL        = "dall-e-3"
 
 # Only "auto" and "" trigger routing; explicit model names are respected.
@@ -64,14 +65,37 @@ _IMAGE_RE = re.compile(
 _image_tasks: Dict[str, "asyncio.Task[str]"] = {}
 
 # ── language heuristic ────────────────────────────────────────────────────────
-_NON_LATIN_THRESHOLD = 0.15
+_SCRIPT_THRESHOLD = 0.15
 
 
 def _dominant_script(text: str) -> str:
+    """Return 'hangul', 'cjk', or 'latin' based on the dominant Unicode script.
+
+    Checked in priority order: Hangul first (Korean), then CJK/kana (Chinese /
+    Japanese), then Latin default.  Threshold: fraction of characters that must
+    belong to a script for it to win.
+    """
     if not text:
         return "latin"
-    non_latin = sum(1 for c in text if ord(c) > 0x024F)
-    return "non-latin" if (non_latin / len(text)) > _NON_LATIN_THRESHOLD else "latin"
+    total = len(text)
+    hangul = sum(
+        1 for c in text
+        if 0xAC00 <= ord(c) <= 0xD7A3   # Hangul syllables
+        or 0x1100 <= ord(c) <= 0x11FF   # Hangul Jamo
+        or 0x3130 <= ord(c) <= 0x318F   # Hangul Compatibility Jamo
+    )
+    if hangul / total > _SCRIPT_THRESHOLD:
+        return "hangul"
+    cjk = sum(
+        1 for c in text
+        if 0x4E00 <= ord(c) <= 0x9FFF   # CJK Unified Ideographs
+        or 0x3400 <= ord(c) <= 0x4DBF   # CJK Extension A
+        or 0xF900 <= ord(c) <= 0xFAFF   # CJK Compatibility
+        or 0x3040 <= ord(c) <= 0x30FF   # Hiragana + Katakana (Japanese)
+    )
+    if cjk / total > _SCRIPT_THRESHOLD:
+        return "cjk"
+    return "latin"
 
 
 # ── image generation ──────────────────────────────────────────────────────────
@@ -219,15 +243,32 @@ class UnifiedRouter(litellm.CustomLogger):
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
             data["model"]      = _ENGLISH_MODEL
             data["max_tokens"] = 1
+            data.setdefault("metadata", {})
+            data["metadata"]["detected_script"] = "image"
+            data["metadata"]["routed_model"]    = _IMAGE_MODEL
+            data["metadata"]["trace_name"]      = "image/generate"
+            data["metadata"]["generation_name"] = "image-stub"
+            data["metadata"]["tags"]            = ["script:image", f"model:{_IMAGE_MODEL}"]
             # stream stays as-is — streaming calls use async_post_call_streaming_iterator_hook,
             # non-streaming calls use async_post_call_success_hook.
             return data
 
         # ── 2. Language routing ───────────────────────────────────────────────
-        if _dominant_script(last_user) == "non-latin":
-            data["model"] = _MULTILINGUAL_MODEL
+        script = _dominant_script(last_user)
+        if script == "hangul":
+            routed = _MULTILINGUAL_MODEL
+        elif script == "cjk":
+            routed = _CJK_MODEL
         else:
-            data["model"] = _ENGLISH_MODEL
+            routed = _ENGLISH_MODEL
+        data["model"] = routed
+
+        data.setdefault("metadata", {})
+        data["metadata"]["detected_script"] = script
+        data["metadata"]["routed_model"]    = routed
+        data["metadata"]["trace_name"]      = f"chat/{script}"
+        data["metadata"]["generation_name"] = f"{routed}/response"
+        data["metadata"]["tags"]            = [f"script:{script}", f"model:{routed}"]
 
         return data
 

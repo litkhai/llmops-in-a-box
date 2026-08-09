@@ -255,15 +255,20 @@ layers:
       language_routing:
         # Automatic language detection routes requests before they reach the
         # model. The callback (docker/litellm_callbacks.py) inspects the last
-        # user message and rewrites the model field:
-        #   - Non-Latin-primary text (Korean, Japanese, etc.) → multilingual_model
-        #   - Latin-primary text (English, etc.)              → english_model
-        # Clients that explicitly request a model other than the two aliases
-        # below are not affected. The threshold is the fraction of characters
-        # above U+024F required to classify a message as non-Latin.
+        # user message and rewrites the model field based on Unicode script:
+        #   - Hangul-primary (Korean)           → multilingual_model (claude-sonnet)
+        #   - CJK/kana-primary (Chinese/Japanese) → cjk_model (qwen-7b)
+        #   - Latin-primary (English, etc.)     → english_model (gpt-4o)
+        # Routing decisions are tagged as metadata on every Langfuse trace:
+        #   detected_script: hangul | cjk | latin | image
+        #   routed_model:    the alias actually used
+        # Clients that explicitly request a model are not affected.
+        # The threshold is the fraction of characters in a script required
+        # to classify a message; checked Hangul-first, then CJK.
         enabled: true
         english_model: gpt-4o
         multilingual_model: claude-sonnet
+        cjk_model: qwen-7b
         threshold: 0.15
       routing:
         strategy: simple-shuffle
@@ -355,19 +360,21 @@ layers:
 
   serving:
     phase: 4
-    # Nothing to scaffold in this repo — the pod is provisioned in the RunPod
-    # console, so this stays `true` and `--profile phase-4` works as soon as
-    # VLLM_API_BASE points at a live pod.
+    # Nothing to scaffold in this repo — the endpoint is provisioned in the
+    # RunPod console (Serverless → New Endpoint → vLLM worker template), so
+    # this stays `true` and `--profile phase-4` works as soon as VLLM_API_BASE
+    # points at a live serverless endpoint.
     enabled: true
     impl: vllm
-    managed_by: runpod          # NOT a compose service — lives on a GPU pod
+    managed_by: runpod          # NOT a compose service — RunPod Serverless
     compose_profile: null
     port: 8000
     requires: []
     options:
-      api_base_env: VLLM_API_BASE
-      api_key_env: VLLM_API_KEY
-      gpu: 1x A40 or L40S        # sufficient for a 7B model
+      api_base_env: VLLM_API_BASE   # https://api.runpod.ai/v2/{endpoint_id}/openai/v1
+      api_key_env: VLLM_API_KEY     # RunPod API key
+      deployment: serverless        # cost-optimised; workers spin up on demand
+      gpu_min: RTX 3090             # minimum tier for a 7B bfloat16 model (~24 GiB VRAM)
       model_id: Qwen/Qwen2.5-7B-Instruct
       max_model_len: 32768
       dtype: bfloat16
@@ -542,6 +549,7 @@ models:
     context_window: 32768
     cost_per_1k: { input: 0.0, output: 0.0 }
     rate_limit: { rpm: 60, tpm: 200000 }
+    timeout_s: 120              # serverless cold start can take 30-90 s
     ui:
       label: Qwen2.5 7B — GPU
       description: Runs on a RunPod GPU pod. No data leaves the boundary.
@@ -664,11 +672,11 @@ secrets:
       - CLICKHOUSE_CLOUD_USER
       - CLICKHOUSE_CLOUD_PASSWORD
     3:
-      - VLLM_API_BASE
-      - VLLM_API_KEY
-    4:
       - ARTIFACT_MINIO_ROOT_USER
       - ARTIFACT_MINIO_ROOT_PASSWORD
+    4:
+      - VLLM_API_BASE
+      - VLLM_API_KEY
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Render targets for the model catalog.
