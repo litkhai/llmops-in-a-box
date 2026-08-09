@@ -17,12 +17,12 @@ Two routing decisions are made here before the request reaches a provider:
 
 2. LANGUAGE ROUTING — for plain chat requests the model field is rewritten based
    on the dominant Unicode script of the last user message:
-     non-Latin-primary (Korean, CJK, …) → claude-sonnet
-     Latin-primary (English, …)          → gpt-4o
+     non-Latin-primary (Korean, CJK, …) → qwen-7b  (RunPod self-hosted)
+     Latin-primary (English, …)          → qwen-7b  (RunPod self-hosted)
 
    Fallback (configured in litellm_config.yaml):
-     gpt-4o ↔ claude-sonnet  (bidirectional)
-     auto   → claude-sonnet  (if language-routed target fails)
+     qwen-7b → claude-sonnet  (when the self-hosted pod is cold or down)
+     auto    → claude-sonnet  (if language-routed target fails)
 
 Script detection is a pure Unicode heuristic — no extra network call, < 1 ms
 added to p99 latency.
@@ -42,9 +42,9 @@ import httpx
 import litellm
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
-_ENGLISH_MODEL      = "gpt-4o"
-_MULTILINGUAL_MODEL = "claude-sonnet"   # Hangul (Korean)
-_CJK_MODEL          = "qwen-7b"         # CJK (Chinese, Japanese)
+_ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
+_MULTILINGUAL_MODEL = "qwen-7b"          # Hangul (Korean) — RunPod
+_CJK_MODEL          = "qwen-7b"          # CJK (Chinese, Japanese) — RunPod
 _IMAGE_MODEL        = "dall-e-3"
 
 # Only "auto" and "" trigger routing; explicit model names are respected.

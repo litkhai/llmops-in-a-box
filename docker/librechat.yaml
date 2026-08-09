@@ -14,14 +14,13 @@ endpoints:
           - "auto"
         fetch: false
       titleConvo: true
-      titleModel: "gpt-4o"
+      titleModel: "claude-sonnet"
       modelDisplayLabel: "Sovereign AI Stack"
       iconURL: ""
 
 # Model catalog (from stack.yaml):
 #   qwen-7b        Qwen2.5 7B — GPU — Runs on a RunPod GPU pod. No data leaves the boundary.
 #   qwen-0.5b      Qwen2.5 0.5B — CPU — Runs on EC2 CPU. No GPU required, no data leaves the boundary.
-#   gpt-4o         GPT-4o — OpenAI commercial API.
 #   claude-sonnet  Claude Sonnet 4.5 — Anthropic commercial API, format-translated by LiteLLM.
 
 mcpSettings:
