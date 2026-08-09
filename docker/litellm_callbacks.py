@@ -41,6 +41,9 @@ from typing import Dict
 
 import httpx
 import litellm
+from langfuse import Langfuse
+
+_langfuse = Langfuse()  # reads LANGFUSE_* env vars already set in litellm container
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 _ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
@@ -212,6 +215,17 @@ async def _generate_image(prompt: str) -> str:
             return f"Image generation failed: {exc}"
 
 
+# ── langfuse helpers ──────────────────────────────────────────────────────────
+
+def _span(trace_id: str, name: str, input_: dict, output: dict) -> None:
+    """Create a completed Langfuse span nested under an existing trace."""
+    try:
+        s = _langfuse.span(trace_id=trace_id, name=name, input=input_, output=output)
+        s.end()
+    except Exception:
+        pass  # never let observability code break the critical path
+
+
 # ── callback ──────────────────────────────────────────────────────────────────
 
 class UnifiedRouter(litellm.CustomLogger):
@@ -239,17 +253,26 @@ class UnifiedRouter(litellm.CustomLogger):
 
         call_id = str(data.get("litellm_call_id") or id(data))
 
+        # Use call_id as trace_id so our custom spans nest under LiteLLM's generation.
+        data.setdefault("metadata", {})
+        trace_id = data["metadata"].get("trace_id") or call_id
+        data["metadata"]["trace_id"] = trace_id
+
         # ── 1. Tool-use routing — skip language routing for agentic requests ──
         # qwen-7b is a small model with poor function-calling reliability.
         # Any request that carries tools goes straight to the capable model.
         if data.get("tools"):
             data["model"] = _ENGLISH_MODEL
-            data.setdefault("metadata", {})
             data["metadata"]["detected_script"] = "tool-use"
             data["metadata"]["routed_model"]    = _ENGLISH_MODEL
             data["metadata"]["trace_name"]      = "chat/tool-use"
             data["metadata"]["generation_name"] = f"{_ENGLISH_MODEL}/response"
             data["metadata"]["tags"]            = ["script:tool-use", f"routed:{_ENGLISH_MODEL}"]
+            _span(trace_id, "routing", {"script": "tool-use", "tools": [t.get("function", {}).get("name") for t in (data.get("tools") or [])]}, {"routed": _ENGLISH_MODEL})
+            # Log any tool results from LibreChat's agentic loop as individual spans.
+            for msg in messages:
+                if msg.get("role") == "tool":
+                    _span(trace_id, f"tool-result/{msg.get('name', 'unknown')}", {"tool_call_id": msg.get("tool_call_id")}, {"content": str(msg.get("content", ""))[:500]})
             return data
 
         # ── 2. Image routing ──────────────────────────────────────────────────
@@ -257,17 +280,17 @@ class UnifiedRouter(litellm.CustomLogger):
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
             data["model"]      = _ENGLISH_MODEL
             data["max_tokens"] = 1
-            data.setdefault("metadata", {})
             data["metadata"]["detected_script"] = "image"
             data["metadata"]["routed_model"]    = _IMAGE_MODEL
             data["metadata"]["trace_name"]      = "image/generate"
             data["metadata"]["generation_name"] = "image-stub"
             data["metadata"]["tags"]            = ["script:image", f"routed:{_IMAGE_MODEL}"]
+            _span(trace_id, "routing", {"script": "image", "prompt": last_user[:200]}, {"routed": _IMAGE_MODEL})
             # stream stays as-is — streaming calls use async_post_call_streaming_iterator_hook,
             # non-streaming calls use async_post_call_success_hook.
             return data
 
-        # ── 2. Language routing ───────────────────────────────────────────────
+        # ── 3. Language routing ───────────────────────────────────────────────
         script = _dominant_script(last_user)
         if script == "hangul":
             routed = _MULTILINGUAL_MODEL
@@ -277,12 +300,12 @@ class UnifiedRouter(litellm.CustomLogger):
             routed = _ENGLISH_MODEL
         data["model"] = routed
 
-        data.setdefault("metadata", {})
         data["metadata"]["detected_script"] = script
         data["metadata"]["routed_model"]    = routed
         data["metadata"]["trace_name"]      = f"chat/{script}"
         data["metadata"]["generation_name"] = f"{routed}/response"
         data["metadata"]["tags"]            = [f"script:{script}", f"routed:{routed}"]
+        _span(trace_id, "routing", {"script": script, "message_preview": last_user[:200]}, {"routed": routed})
 
         return data
 
