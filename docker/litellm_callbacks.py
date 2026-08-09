@@ -217,6 +217,13 @@ async def _generate_image(prompt: str) -> str:
 
 # ── langfuse helpers ──────────────────────────────────────────────────────────
 
+def _extract_output(response_obj) -> str:
+    try:
+        return response_obj.choices[0].message.content or ""
+    except (AttributeError, IndexError):
+        return str(response_obj)
+
+
 def _span(trace_id: str, name: str, input_: dict, output: dict) -> None:
     """Create a completed Langfuse span nested under an existing trace."""
     try:
@@ -372,21 +379,55 @@ class UnifiedRouter(litellm.CustomLogger):
         )
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        # Tag the actual model used — may differ from routed_model when fallback occurs.
+        # Only log completion calls — skip management API noise (/v2/user/info, etc.)
+        if kwargs.get("call_type") not in ("completion", "acompletion"):
+            return
+        if kwargs.get("messages") == "default-message-value":
+            return
+
         meta = kwargs.get("litellm_params", {}).get("metadata") or {}
         if not meta.get("routed_model"):
             return
 
         actual = getattr(response_obj, "model", None) or kwargs.get("model", "")
-        # Normalise: LiteLLM sometimes prefixes with provider, e.g. "openai/gpt-4o"
         actual_alias = actual.split("/")[-1] if "/" in actual else actual
 
-        tags = meta.get("tags") or []
+        tags = list(meta.get("tags") or [])
         tags.append(f"actual:{actual_alias}")
-        if actual_alias != meta["routed_model"]:
+        if actual_alias != meta.get("routed_model"):
             tags.append("fallback:true")
-        meta["tags"] = tags
-        meta["actual_model"] = actual_alias
+
+        trace_id  = kwargs.get("litellm_call_id") or str(id(kwargs))
+        usage     = getattr(response_obj, "usage", None)
+        is_image  = meta.get("detected_script") == "image"
+
+        try:
+            trace = _langfuse.trace(
+                id=trace_id,
+                name=meta.get("trace_name", f"chat/{meta.get('detected_script', 'unknown')}"),
+                tags=tags,
+                metadata={"detected_script": meta.get("detected_script"), "routed_model": meta.get("routed_model"), "actual_model": actual_alias},
+                input=None if is_image else kwargs.get("messages"),
+                output=None if is_image else _extract_output(response_obj),
+            )
+            if not is_image:
+                gen = trace.generation(
+                    name=meta.get("generation_name", f"{actual_alias}/response"),
+                    model=actual,
+                    input=kwargs.get("messages"),
+                    output=_extract_output(response_obj),
+                    usage={
+                        "input": getattr(usage, "prompt_tokens", 0),
+                        "output": getattr(usage, "completion_tokens", 0),
+                        "total": getattr(usage, "total_tokens", 0),
+                    } if usage else None,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                gen.end()
+            _langfuse.flush()
+        except Exception:
+            pass
 
     async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
         # Clean up the image task on LLM failure so the dict does not leak.
@@ -394,6 +435,24 @@ class UnifiedRouter(litellm.CustomLogger):
         task = _image_tasks.pop(call_id, None)
         if task and not task.done():
             task.cancel()
+
+        # Log failure to Langfuse (management API calls excluded by "default-message-value" check).
+        if data.get("messages") == "default-message-value":
+            return
+        meta = data.get("metadata") or {}
+        if not meta.get("routed_model"):
+            return
+        trace_id = str(data.get("litellm_call_id") or id(data))
+        try:
+            _langfuse.trace(
+                id=trace_id,
+                name=meta.get("trace_name", "chat/error"),
+                tags=(meta.get("tags") or []) + ["error:true"],
+                metadata={"error": str(original_exception)[:500], "routed_model": meta.get("routed_model")},
+            )
+            _langfuse.flush()
+        except Exception:
+            pass
 
 
 # LiteLLM discovers the callback by module-level instantiation.

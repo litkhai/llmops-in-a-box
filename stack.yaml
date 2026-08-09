@@ -249,8 +249,8 @@ layers:
       request_timeout_s: 5  # per-request timeout; fallback triggers immediately on 429/5xx
       drop_params: true         # tolerate params a given provider doesn't accept
       callbacks:
-        success: [langfuse]
-        failure: [langfuse]
+        success: []
+        failure: []
       default_tags: [llmops-in-a-box]
       language_routing:
         # Automatic language detection routes requests before they reach the
