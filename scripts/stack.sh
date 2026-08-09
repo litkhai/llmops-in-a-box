@@ -368,8 +368,8 @@ render_litellm() {
           has_mcp=1
         fi
         transport="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .transport")"
-        printf '  - server_name: "%s"\n' "$srv_name"
-        printf '    server_path_or_url: "http://mcp-%s:9100/sse"\n' "$srv_name"
+        printf '  %s:\n' "$srv_name"
+        printf '    url: "http://mcp-%s:9100/sse"\n' "$srv_name"
         printf '    transport: "%s"\n' "$transport"
       done < <(q '.layers.tools.options.servers[].name')
     fi

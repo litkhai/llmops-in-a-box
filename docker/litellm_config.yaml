@@ -85,8 +85,8 @@ router_settings:
     - { "auto": [claude-sonnet] }
 
 mcp_servers:
-  - server_name: "clickhouse"
-    server_path_or_url: "http://mcp-clickhouse:9100/sse"
+  clickhouse:
+    url: "http://mcp-clickhouse:9100/sse"
     transport: "sse"
 
 general_settings:
