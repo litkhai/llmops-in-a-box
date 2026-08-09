@@ -238,7 +238,20 @@ class UnifiedRouter(litellm.CustomLogger):
 
         call_id = str(data.get("litellm_call_id") or id(data))
 
-        # ── 1. Image routing ──────────────────────────────────────────────────
+        # ── 1. Tool-use routing — skip language routing for agentic requests ──
+        # qwen-7b is a small model with poor function-calling reliability.
+        # Any request that carries tools goes straight to the capable model.
+        if data.get("tools"):
+            data["model"] = _ENGLISH_MODEL
+            data.setdefault("metadata", {})
+            data["metadata"]["detected_script"] = "tool-use"
+            data["metadata"]["routed_model"]    = _ENGLISH_MODEL
+            data["metadata"]["trace_name"]      = "chat/tool-use"
+            data["metadata"]["generation_name"] = f"{_ENGLISH_MODEL}/response"
+            data["metadata"]["tags"]            = ["script:tool-use", f"routed:{_ENGLISH_MODEL}"]
+            return data
+
+        # ── 2. Image routing ──────────────────────────────────────────────────
         if _IMAGE_RE.search(last_user):
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
             data["model"]      = _ENGLISH_MODEL
