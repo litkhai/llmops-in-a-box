@@ -305,6 +305,9 @@ services:
       CF_API_TOKEN: ${CF_API_TOKEN:-}
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
 
+      # Feedback sidecar — receives user ratings and writes Langfuse scores.
+      FEEDBACK_SERVICE_URL: http://feedback:8080
+
       # Image storage — generated images are uploaded to MinIO so LibreChat
       # can render them via a URL instead of an inline base64 data URI.
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
@@ -325,6 +328,34 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+
+  # ══ feedback — user rating proxy ════════════════════════════════════════
+  #
+  # Accepts POST /score (content + value) or /score-by-id (trace_id + value)
+  # and writes a Langfuse user_feedback score.  LiteLLM's async_log_success_event
+  # calls POST /register to pre-cache content-hash → trace_id mappings.
+  #
+  # Usage:
+  #   curl http://localhost:8080/score \
+  #        -d '{"content": "<response text>", "value": 1.0}'
+
+  feedback:
+    build:
+      context: .
+      dockerfile: Dockerfile.feedback
+    profiles: [gateway]
+    restart: unless-stopped
+    environment:
+      LANGFUSE_HOST: ${LITELLM_LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+    ports:
+      - "0.0.0.0:${FEEDBACK_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://0.0.0.0:8080/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   # ══ ui — LibreChat and its MongoDB ═══════════════════════════════════════
 

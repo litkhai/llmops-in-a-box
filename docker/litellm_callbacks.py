@@ -39,11 +39,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict
 
+import json
+
 import httpx
 import litellm
 from langfuse import Langfuse
 
 _langfuse = Langfuse()  # reads LANGFUSE_* env vars already set in litellm container
+
+# ── scoring constants ─────────────────────────────────────────────────────────
+_LATENCY_CAP_S  = 30.0     # latency_score = 0.0 at 30 s or above
+_JUDGE_MODEL    = "claude-haiku-4-5-20251001"
+_FEEDBACK_URL   = os.environ.get("FEEDBACK_SERVICE_URL", "http://feedback:8080")
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 _ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
@@ -231,6 +238,148 @@ def _span(trace_id: str, name: str, input_: dict, output: dict) -> None:
         s.end()
     except Exception:
         pass  # never let observability code break the critical path
+
+
+# ── rule-based scoring ────────────────────────────────────────────────────────
+
+def _score_routing(trace_id: str, tags: list) -> None:
+    """1.0 if routed to intended model, 0.0 if a fallback was triggered."""
+    is_fallback = "fallback:true" in tags
+    try:
+        _langfuse.score(
+            trace_id=trace_id,
+            name="routing_accuracy",
+            value=0.0 if is_fallback else 1.0,
+            data_type="BOOLEAN",
+            comment="fallback triggered" if is_fallback else "routed as intended",
+        )
+    except Exception:
+        pass
+
+
+def _score_language_consistency(trace_id: str, input_script: str, output_text: str) -> None:
+    """1.0 if the response language matches the detected input script."""
+    output_script = _dominant_script(output_text[:500])
+    # Latin output is always acceptable (e.g. model names, code, proper nouns).
+    consistent = (output_script == input_script) or (output_script == "latin")
+    try:
+        _langfuse.score(
+            trace_id=trace_id,
+            name="language_consistency",
+            value=1.0 if consistent else 0.0,
+            data_type="BOOLEAN",
+            comment=f"input:{input_script} output:{output_script}",
+        )
+    except Exception:
+        pass
+
+
+def _score_latency(trace_id: str, start_time, end_time) -> None:
+    """0.0–1.0 inversely proportional to latency; 0.0 at >= 30 s."""
+    try:
+        if isinstance(start_time, datetime) and isinstance(end_time, datetime):
+            latency = (end_time - start_time).total_seconds()
+        else:
+            latency = float(end_time) - float(start_time)
+        score = max(0.0, 1.0 - latency / _LATENCY_CAP_S)
+        _langfuse.score(
+            trace_id=trace_id,
+            name="latency_score",
+            value=round(score, 3),
+            data_type="NUMERIC",
+            comment=f"{latency:.1f}s",
+        )
+    except Exception:
+        pass
+
+
+# ── LLM-as-judge ──────────────────────────────────────────────────────────────
+
+async def _judge_response(trace_id: str, messages: list, output: str) -> None:
+    """Call claude-haiku to score helpfulness and language match.
+
+    Runs as a fire-and-forget asyncio task.  Skipped when ANTHROPIC_API_KEY is
+    absent so the stack works fully offline.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key or not output:
+        return
+
+    last_user = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+    if not last_user:
+        return
+
+    prompt = (
+        "Evaluate the AI response below. Return JSON only, no explanation.\n\n"
+        f"User: {last_user[:400]}\n"
+        f"Assistant: {output[:400]}\n\n"
+        '{"helpfulness": <float 0.0-1.0, how well it answers the question>, '
+        '"language_match": <1 if response language matches the user message language, else 0>}'
+    )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": _JUDGE_MODEL,
+                    "max_tokens": 60,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            raw = resp.json()["content"][0]["text"].strip()
+            match = re.search(r"\{[^}]+\}", raw)
+            if not match:
+                return
+            scores = json.loads(match.group())
+            _langfuse.score(
+                trace_id=trace_id,
+                name="helpfulness",
+                value=round(max(0.0, min(1.0, float(scores.get("helpfulness", 0.5)))), 3),
+                data_type="NUMERIC",
+            )
+            _langfuse.score(
+                trace_id=trace_id,
+                name="judge_language_match",
+                value=float(scores.get("language_match", 1)),
+                data_type="BOOLEAN",
+            )
+            _langfuse.flush()
+    except Exception:
+        pass
+
+
+# ── user feedback registration ─────────────────────────────────────────────────
+
+async def _register_for_feedback(trace_id: str, content: str) -> None:
+    """Push trace_id + response content to the feedback sidecar.
+
+    The feedback service stores a content-hash → trace_id mapping so that
+    user ratings (submitted with the response text) can be linked back to the
+    correct Langfuse trace.  Silently skipped if the sidecar is not running.
+    """
+    if not content:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{_FEEDBACK_URL}/register",
+                json={"trace_id": trace_id, "content": content},
+                timeout=2.0,
+            )
+    except Exception:
+        pass
 
 
 # ── callback ──────────────────────────────────────────────────────────────────
@@ -428,6 +577,14 @@ class UnifiedRouter(litellm.CustomLogger):
             _langfuse.flush()
         except Exception:
             pass
+
+        # ── scores ────────────────────────────────────────────────────────────
+        output = _extract_output(response_obj)
+        _score_routing(trace_id, tags)
+        _score_language_consistency(trace_id, meta.get("detected_script", "latin"), output)
+        _score_latency(trace_id, start_time, end_time)
+        asyncio.ensure_future(_judge_response(trace_id, kwargs.get("messages") or [], output))
+        asyncio.ensure_future(_register_for_feedback(trace_id, output))
 
     async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
         # Clean up the image task on LLM failure so the dict does not leak.
