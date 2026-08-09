@@ -256,7 +256,7 @@ layers:
         # Automatic language detection routes requests before they reach the
         # model. The callback (docker/litellm_callbacks.py) inspects the last
         # user message and rewrites the model field based on Unicode script:
-        #   - Hangul-primary (Korean)           → multilingual_model (qwen-7b, RunPod)
+        #   - Hangul-primary (Korean)           → multilingual_model (claude-sonnet)
         #   - CJK/kana-primary (Chinese/Japanese) → cjk_model (qwen-7b, RunPod)
         #   - Latin-primary (English, etc.)     → english_model (qwen-7b, RunPod)
         # Routing decisions are tagged as metadata on every Langfuse trace:
@@ -267,7 +267,7 @@ layers:
         # to classify a message; checked Hangul-first, then CJK.
         enabled: true
         english_model: qwen-7b
-        multilingual_model: qwen-7b
+        multilingual_model: claude-sonnet
         cjk_model: qwen-7b
         threshold: 0.15
       routing:

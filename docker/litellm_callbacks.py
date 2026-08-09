@@ -17,7 +17,8 @@ Two routing decisions are made here before the request reaches a provider:
 
 2. LANGUAGE ROUTING — for plain chat requests the model field is rewritten based
    on the dominant Unicode script of the last user message:
-     non-Latin-primary (Korean, CJK, …) → qwen-7b  (RunPod self-hosted)
+     Hangul-primary (Korean)             → claude-sonnet
+     CJK-primary (Chinese, Japanese, …) → qwen-7b  (RunPod self-hosted)
      Latin-primary (English, …)          → qwen-7b  (RunPod self-hosted)
 
    Fallback (configured in litellm_config.yaml):
@@ -43,7 +44,7 @@ import litellm
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 _ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
-_MULTILINGUAL_MODEL = "qwen-7b"          # Hangul (Korean) — RunPod
+_MULTILINGUAL_MODEL = "claude-sonnet"    # Hangul (Korean)
 _CJK_MODEL          = "qwen-7b"          # CJK (Chinese, Japanese) — RunPod
 _IMAGE_MODEL        = "dall-e-3"
 
