@@ -248,7 +248,7 @@ class UnifiedRouter(litellm.CustomLogger):
             data["metadata"]["routed_model"]    = _IMAGE_MODEL
             data["metadata"]["trace_name"]      = "image/generate"
             data["metadata"]["generation_name"] = "image-stub"
-            data["metadata"]["tags"]            = ["script:image", f"model:{_IMAGE_MODEL}"]
+            data["metadata"]["tags"]            = ["script:image", f"routed:{_IMAGE_MODEL}"]
             # stream stays as-is — streaming calls use async_post_call_streaming_iterator_hook,
             # non-streaming calls use async_post_call_success_hook.
             return data
@@ -268,7 +268,7 @@ class UnifiedRouter(litellm.CustomLogger):
         data["metadata"]["routed_model"]    = routed
         data["metadata"]["trace_name"]      = f"chat/{script}"
         data["metadata"]["generation_name"] = f"{routed}/response"
-        data["metadata"]["tags"]            = [f"script:{script}", f"model:{routed}"]
+        data["metadata"]["tags"]            = [f"script:{script}", f"routed:{routed}"]
 
         return data
 
@@ -333,6 +333,23 @@ class UnifiedRouter(litellm.CustomLogger):
                 finish_reason="stop",
             )],
         )
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        # Tag the actual model used — may differ from routed_model when fallback occurs.
+        meta = kwargs.get("litellm_params", {}).get("metadata") or {}
+        if not meta.get("routed_model"):
+            return
+
+        actual = getattr(response_obj, "model", None) or kwargs.get("model", "")
+        # Normalise: LiteLLM sometimes prefixes with provider, e.g. "openai/gpt-4o"
+        actual_alias = actual.split("/")[-1] if "/" in actual else actual
+
+        tags = meta.get("tags") or []
+        tags.append(f"actual:{actual_alias}")
+        if actual_alias != meta["routed_model"]:
+            tags.append("fallback:true")
+        meta["tags"] = tags
+        meta["actual_model"] = actual_alias
 
     async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
         # Clean up the image task on LLM failure so the dict does not leak.

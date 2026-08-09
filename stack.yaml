@@ -549,7 +549,7 @@ models:
     context_window: 32768
     cost_per_1k: { input: 0.0, output: 0.0 }
     rate_limit: { rpm: 60, tpm: 200000 }
-    timeout_s: 120              # serverless cold start can take 30-90 s
+    timeout_s: 300              # serverless cold start: model load can exceed 120 s
     ui:
       label: Qwen2.5 7B — GPU
       description: Runs on a RunPod GPU pod. No data leaves the boundary.

@@ -9,7 +9,7 @@ model_list:
       api_key: os.environ/VLLM_API_KEY
       rpm: 60
       tpm: 200000
-      timeout: 120
+      timeout: 300
     model_info:
       mode: chat
       max_input_tokens: 32768
