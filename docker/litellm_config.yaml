@@ -49,6 +49,7 @@ litellm_settings:
   max_budget: 50
   budget_duration: 30d
   callbacks: [callbacks.language_router]
+  default_tags: [llmops-in-a-box]
 
 router_settings:
   routing_strategy: simple-shuffle

@@ -294,6 +294,7 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LITELLM_LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_TRACING_ENVIRONMENT: ${LANGFUSE_TRACING_ENVIRONMENT:-demo}
 
       # Image generation — Cloudflare Workers AI (optional; leave blank to disable).
       CF_API_TOKEN: ${CF_API_TOKEN:-}

@@ -251,6 +251,7 @@ layers:
       callbacks:
         success: [langfuse]
         failure: [langfuse]
+      default_tags: [llmops-in-a-box]
       language_routing:
         # Automatic language detection routes requests before they reach the
         # model. The callback (docker/litellm_callbacks.py) inspects the last

@@ -323,6 +323,9 @@ render_litellm() {
     if [ "$lr_enabled" = "true" ]; then
       printf '  callbacks: [callbacks.language_router]\n'
     fi
+    local default_tags
+    default_tags="$(qs '.layers.gateway.options.default_tags')"
+    [ -n "$default_tags" ] && printf '  default_tags: %s\n' "$default_tags"
 
     # ── router_settings — only emit fallbacks whose models are all present ──
     printf '\nrouter_settings:\n'
