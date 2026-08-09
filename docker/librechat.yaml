@@ -23,3 +23,8 @@ endpoints:
 #   qwen-0.5b      Qwen2.5 0.5B — CPU — Runs on EC2 CPU. No GPU required, no data leaves the boundary.
 #   gpt-4o         GPT-4o — OpenAI commercial API.
 #   claude-sonnet  Claude Sonnet 4.5 — Anthropic commercial API, format-translated by LiteLLM.
+
+mcpServers:
+  clickhouse:
+    type: sse
+    url: "http://mcp-clickhouse:9100/sse"
