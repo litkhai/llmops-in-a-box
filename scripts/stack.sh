@@ -438,7 +438,22 @@ render_librechat() {
     # LibreChat exposes these as agent tools; requests still flow through the
     # custom endpoint (LiteLLM) so every LLM call is traced in Langfuse.
     if resolved_layers | grep -qx tools; then
-      local has_mcp=0 srv_name srv_enabled
+      local has_mcp=0 has_mcp_settings=0 srv_name srv_enabled mcp_port
+      mcp_port="$(qs '.layers.tools.port')"
+      # mcpSettings.allowedAddresses exempts internal Docker hostnames from
+      # LibreChat's SSRF protection so mcp-* containers can be reached.
+      while IFS= read -r srv_name; do
+        [ -n "$srv_name" ] || continue
+        srv_enabled="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .enabled")"
+        [ "$srv_enabled" = "true" ] || continue
+        if [ "$has_mcp_settings" -eq 0 ]; then
+          printf '\nmcpSettings:\n'
+          printf '  allowedAddresses:\n'
+          has_mcp_settings=1
+        fi
+        printf '    - "mcp-%s:%s"\n' "$srv_name" "$mcp_port"
+      done < <(q '.layers.tools.options.servers[].name')
+
       while IFS= read -r srv_name; do
         [ -n "$srv_name" ] || continue
         srv_enabled="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .enabled")"
@@ -449,7 +464,7 @@ render_librechat() {
         fi
         printf '  %s:\n' "$srv_name"
         printf '    type: sse\n'
-        printf '    url: "http://mcp-%s:9100/sse"\n' "$srv_name"
+        printf '    url: "http://mcp-%s:%s/sse"\n' "$srv_name" "$mcp_port"
       done < <(q '.layers.tools.options.servers[].name')
     fi
 
