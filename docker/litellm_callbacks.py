@@ -212,9 +212,12 @@ def _minio_put_url(bucket: str, key: str, img_bytes: bytes) -> str:
 async def _generate_image(prompt: str) -> str:
     """
     Generate an image via Cloudflare Workers AI (FLUX.1-schnell).
-    Uploads to MinIO and returns a public URL. If MinIO upload fails or the
-    URL is unreachable from the container, falls back to a base64 data URL so
-    LibreChat can always display the image inline.
+    Uploads to MinIO and returns a public URL.
+
+    MINIO_PUBLIC_HOST must be set to the server's public address (e.g.
+    http://43.201.101.143:9002) so the URL is browser-resolvable.  Without
+    it, _minio_put_url falls back to the internal Docker hostname (http://minio:9000)
+    which the user's browser cannot reach — that is the root cause of broken images.
     """
     async with httpx.AsyncClient() as client:
         try:
@@ -222,14 +225,13 @@ async def _generate_image(prompt: str) -> str:
             img_bytes = base64.b64decode(b64)
             if len(img_bytes) < 100:
                 raise ValueError(f"Cloudflare returned too-small image ({len(img_bytes)} bytes)")
-            # Detect actual image format from magic bytes
             if img_bytes[:8] == b'\x89PNG\r\n\x1a\n':
-                mime, ext = "image/png", "png"
+                ext = "png"
             else:
-                mime, ext = "image/jpeg", "jpg"
-            # TEST: return tiny 1x1 pixel PNG to check if small data URLs render
-            test_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
-            return f"![generated image](data:image/png;base64,{test_b64})"
+                ext = "jpg"
+            key = f"generated/{uuid.uuid4().hex}.{ext}"
+            url = _minio_put_url("images", key, img_bytes)
+            return f"![generated image]({url})"
         except Exception as exc:
             return f"Image generation failed: {exc}"
 
@@ -633,11 +635,19 @@ class UnifiedRouter(litellm.CustomLogger):
         usage     = getattr(response_obj, "usage", None)
         is_image  = meta.get("detected_script") == "image"
 
+        # LibreChat passes the user's internal ID as `user`; use it to group all
+        # of that user's traces under one Langfuse session so the Sessions view
+        # is populated. Not per-conversation, but enough to demonstrate the feature.
+        user_id   = kwargs.get("user") or ""
+        session_id = f"user-{user_id}" if user_id else None
+
         try:
             trace = _langfuse.trace(
                 id=trace_id,
                 name=meta.get("trace_name", f"chat/{meta.get('detected_script', 'unknown')}"),
                 tags=tags,
+                session_id=session_id,
+                user_id=user_id or None,
                 metadata={"detected_script": meta.get("detected_script"), "routed_model": meta.get("routed_model"), "actual_model": actual_alias},
                 input=None if is_image else kwargs.get("messages"),
                 output=None if is_image else _extract_output(response_obj),
@@ -672,7 +682,7 @@ class UnifiedRouter(litellm.CustomLogger):
         asyncio.ensure_future(_judge_response(trace_id, messages, output))
         asyncio.ensure_future(_register_for_feedback(trace_id, output))
 
-    async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
+    async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception, **kwargs):
         # Clean up the image task on LLM failure so the dict does not leak.
         call_id = str(data.get("litellm_call_id") or id(data))
         task = _image_tasks.pop(call_id, None)
