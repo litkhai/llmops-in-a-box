@@ -352,9 +352,7 @@ services:
   #        -d '{"content": "<response text>", "value": 1.0}'
 
   feedback:
-    build:
-      context: .
-      dockerfile: Dockerfile.feedback
+    build: ./feedback
     profiles: [gateway]
     restart: unless-stopped
     environment:
