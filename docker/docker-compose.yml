@@ -167,7 +167,8 @@ services:
       -c 'mkdir -p /data/langfuse /data/images;
       minio server --address ":9000" --console-address ":9001" /data &
       until mc ready local 2>/dev/null; do sleep 1; done;
-      mc anonymous set public local/images;
+      mc alias set mylocal http://localhost:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD";
+      mc anonymous set public mylocal/images;
       wait'
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
