@@ -59,9 +59,12 @@ _LANGFUSE_HOST     = os.environ.get("LANGFUSE_HOST", "http://langfuse-web:3000")
 _annotation_queue_id: Optional[str] = None
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
-_ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
+# Phase 4 (RunPod) activates qwen-7b; fall back to claude-sonnet when VLLM is
+# not configured (Phase 1).
+_VLLM_ACTIVE        = bool(os.environ.get("VLLM_API_BASE"))
+_ENGLISH_MODEL      = "qwen-7b" if _VLLM_ACTIVE else "claude-sonnet"
 _MULTILINGUAL_MODEL = "claude-sonnet"    # Hangul (Korean)
-_CJK_MODEL          = "qwen-7b"          # CJK (Chinese, Japanese) — RunPod
+_CJK_MODEL          = "qwen-7b" if _VLLM_ACTIVE else "claude-sonnet"
 _IMAGE_MODEL        = "dall-e-3"
 
 # Only "auto" and "" trigger routing; explicit model names are respected.
