@@ -21,6 +21,8 @@ The usual path into GenAI is not a decision, it is an accumulation. One team shi
 
 **Nobody can tell whether it is getting better.** Quality is discussed anecdotally — someone saw a bad answer, someone else believes the new prompt helped. With no scores attached to real traffic there is no baseline to regress against, so prompt and model changes ship on conviction. And because nothing measures quality, nothing can act on it: routing stays a static config that cannot respond to a route getting worse.
 
+Phase 1 breaks this by attaching five automated scores to every completion trace: three rule-based (routing accuracy, language consistency, latency) and two LLM-as-judge scores (helpfulness, language match). User ratings from LibreChat are correlated to the same traces via a content-hash sidecar. The scores are observable immediately; the routing decisions that act on them come in Phase 5.5.
+
 Each of these is the same problem: **there is no single point every request passes through.** The stack in this repo is the argument that creating one is the highest-leverage thing an enterprise can do early, because every other capability becomes available once it exists.
 
 The last one is also the reason the *same* point has to do both jobs. Measuring quality and deciding where a request goes are separate concerns right up until you want the first to change the second — and then they have to live together, or the loop cannot close. That is what [Phase 5.5](phases.md#55-closing-the-loop-judge-scored-routing) builds, and why it is the destination rather than a late addition.
@@ -204,6 +206,8 @@ Two consequences for how this stack is built:
 | Model alias | A stable client-facing name mapped to a provider model |
 | Virtual key | A gateway-issued consumer key with attribution and limits |
 | Trace / span | One logical operation / one step within it |
+| Score | A named numeric or boolean value attached to a trace — the unit of automated evaluation |
+| LLM-as-judge | Using a separate model to score a primary model's response — here, Anthropic Haiku scoring helpfulness and language match |
 | Context window | The maximum input and output token capacity of a model |
 | Prefix caching | Reusing attention state for an identical prompt prefix |
 | Semantic cache | Reusing a completed answer for a similar prompt; a different mechanism |

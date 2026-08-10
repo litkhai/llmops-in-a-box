@@ -114,7 +114,7 @@ Open Langfuse. Spend the most time here.
 | The error trace | Failures are traced too. Most observability setups only capture successes; you find out about failures from users. |
 | **Sessions** | Multi-turn conversations grouped, not scattered across unrelated traces. |
 | **Datasets** | Promote a real production trace into a dataset. |
-| **Scores** | Score one output — the entry point to systematic evals rather than vibes. |
+| **Scores** | Every completion trace arrives with five automated scores: `routing_accuracy` (was the intended model used?), `language_consistency` (input and output language match?), `latency_score` (0–1 linear, cap 30 s), `helpfulness` and `judge_language_match` (LLM-as-judge via Anthropic Haiku). User ratings from LibreChat attach to the same trace via the feedback sidecar. |
 
 **The framing that matters**
 

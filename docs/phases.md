@@ -45,7 +45,11 @@ Two acceptance tests bound the arc:
 | An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 5 |
 
 Neither passes today. The first cannot, because there is no self-hosted model to
-fall back to; the second cannot, because nothing scores anything yet.
+fall back to. The second is partially in place: Phase 1 now computes five
+automated scores per trace (routing accuracy, language consistency, latency, and
+two LLM-as-judge scores), and a user-feedback sidecar attaches ratings from
+LibreChat to those same traces. The scores exist; routing does not yet act on
+them. That last step is Phase 5.5.
 
 ## Order and current state
 
@@ -91,6 +95,9 @@ Acceptance criteria:
 - the same model catalog appears in LiteLLM and LibreChat
 - success and failure telemetry reaches Langfuse
 - per-model token and cost data is visible
+- every completion trace carries five automated scores: `routing_accuracy`,
+  `language_consistency`, `latency_score`, `helpfulness`, and
+  `judge_language_match`
 
 The profile starts eight local containers. Langfuse connects to **ClickHouse Cloud** for trace analytics (`llmops` database) and runs Postgres, Redis, MinIO, MongoDB, and a worker locally. LibreChat adds MongoDB.
 

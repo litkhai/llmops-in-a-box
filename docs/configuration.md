@@ -282,6 +282,53 @@ To disable routing and send all requests to a single model, set `language_routin
 
 ---
 
+## Automated scoring
+
+Every completion trace receives five scores automatically. No client change is needed.
+
+### Score inventory
+
+| Score name | Type | Description |
+|---|---|---|
+| `routing_accuracy` | BOOLEAN | `1.0` when the request reached the intended model; `0.0` when a fallback was triggered |
+| `language_consistency` | BOOLEAN | `1.0` when the dominant script of the output matches the dominant script of the input |
+| `latency_score` | NUMERIC | Linear decay from `1.0` at 0 s to `0.0` at 30 s — configurable cap |
+| `helpfulness` | NUMERIC | LLM-as-judge score (0.0–1.0): how well the response answers the user's question |
+| `judge_language_match` | BOOLEAN | LLM-as-judge opinion on whether the response language matches the request language |
+
+### Score tiers
+
+**Rule-based (synchronous)** — `routing_accuracy`, `language_consistency`, and `latency_score` are computed inside `async_log_success_event` before the event returns. They add no latency to the gateway response.
+
+**LLM-as-judge (asynchronous)** — `helpfulness` and `judge_language_match` are computed by a direct call to the Anthropic API (`claude-haiku-4-5-20251001`). The call is dispatched as a fire-and-forget `asyncio.Task` so it does not block the response path. The judge calls Anthropic directly via `httpx` rather than through LiteLLM to avoid triggering the scoring callbacks recursively.
+
+**User feedback (sidecar)** — a lightweight FastAPI service (`feedback`) runs alongside the gateway. It maintains a content-hash → trace-id index, populated automatically when each response is logged. LibreChat feedback can be correlated to a Langfuse trace by posting the response text:
+
+```bash
+curl -X POST http://localhost:8080/score \
+  -H "Content-Type: application/json" \
+  -d '{"content": "<first 300 chars of response>", "value": 1, "comment": "helpful"}'
+```
+
+Or by trace ID directly:
+
+```bash
+curl -X POST http://localhost:8080/score-by-id \
+  -H "Content-Type: application/json" \
+  -d '{"trace_id": "<langfuse-trace-id>", "value": 1, "comment": "helpful"}'
+```
+
+The service accepts `value` as `1` (thumbs-up) or `0` (thumbs-down).
+
+### Implementation notes
+
+- `success_callback: []` in `docker/litellm_config.yaml` is intentional. All Langfuse logging, including scoring, is performed manually inside the callback, so management API calls never produce traces or scores.
+- The judge model is set by `_JUDGE_MODEL` in `docker/litellm_callbacks.py`. Changing this requires rebuilding the `litellm` container.
+- The latency cap is `_LATENCY_CAP_S = 30.0`. Adjust in `litellm_callbacks.py` and rebuild.
+- `ANTHROPIC_API_KEY` must be set in `.env` for judge scores to be computed. If absent, the judge task exits silently and the two judge scores are omitted.
+
+---
+
 ## Image generation
 
 Image generation is triggered directly from chat — type an image-intent message (e.g. "그려줘", "draw …", "generate an image of …") in the `auto` chat window and the `UnifiedRouter` callback detects the intent, calls Cloudflare Workers AI directly, and replaces the LLM response with the generated image before it reaches LibreChat.
