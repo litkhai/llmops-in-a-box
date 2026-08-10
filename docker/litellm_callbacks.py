@@ -424,10 +424,21 @@ async def _ensure_annotation_queue() -> Optional[str]:
                     if q.get("name") == "low-quality-traces":
                         _annotation_queue_id = q["id"]
                         return _annotation_queue_id
+            # Langfuse v4 requires at least one scoreConfigId.
+            # Fetch existing configs and use the first one found.
+            rc = await client.get(
+                f"{_LANGFUSE_HOST}/api/public/score-configs?limit=10",
+                auth=(pub, sec), timeout=5.0,
+            )
+            config_ids = [c["id"] for c in rc.json().get("data", [])] if rc.status_code == 200 else []
+            if not config_ids:
+                return None
             r2 = await client.post(
                 f"{_LANGFUSE_HOST}/api/public/annotation-queues",
                 auth=(pub, sec),
-                json={"name": "low-quality-traces", "description": "Traces flagged for human review"},
+                json={"name": "low-quality-traces",
+                      "description": "Traces flagged for human review",
+                      "scoreConfigIds": config_ids[:1]},
                 timeout=5.0,
             )
             if r2.status_code in (200, 201):
@@ -457,10 +468,11 @@ async def _flag_for_review(trace_id: str, messages: list, reason: str) -> None:
     sec = os.environ.get("LANGFUSE_SECRET_KEY", "")
     try:
         async with httpx.AsyncClient() as client:
+            # Langfuse v4 uses objectId/objectType instead of traceId
             await client.post(
                 f"{_LANGFUSE_HOST}/api/public/annotation-queues/{queue_id}/items",
                 auth=(pub, sec),
-                json={"traceId": trace_id},
+                json={"objectId": trace_id, "objectType": "TRACE"},
                 timeout=5.0,
             )
     except Exception:
