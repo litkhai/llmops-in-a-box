@@ -329,13 +329,18 @@ async def _judge_response(trace_id: str, messages: list, output: str) -> None:
     if not last_user:
         return
 
-    prompt = (
+    _hardcoded_prompt = (
         "Evaluate the AI response below. Return JSON only, no explanation.\n\n"
         f"User: {last_user[:400]}\n"
         f"Assistant: {output[:400]}\n\n"
         '{"helpfulness": <float 0.0-1.0, how well it answers the question>, '
         '"language_match": <1 if response language matches the user message language, else 0>}'
     )
+    try:
+        prompt_client = _langfuse.get_prompt("judge-v1")
+        prompt = prompt_client.compile(user_message=last_user[:400], output=output[:400])
+    except Exception:
+        prompt = _hardcoded_prompt
 
     try:
         async with httpx.AsyncClient() as client:
@@ -668,7 +673,8 @@ class UnifiedRouter(litellm.CustomLogger):
                 output=None if is_image else _extract_output(response_obj),
             )
             if not is_image:
-                gen = trace.generation(
+                gen = _langfuse.generation(
+                    trace_id=trace_id,
                     name=meta.get("generation_name", f"{actual_alias}/response"),
                     model=actual,
                     input=kwargs.get("messages"),
