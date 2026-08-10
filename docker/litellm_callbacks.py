@@ -211,19 +211,37 @@ def _minio_put_url(bucket: str, key: str, img_bytes: bytes) -> str:
 
 async def _generate_image(prompt: str) -> str:
     """
-    Generate an image via Cloudflare Workers AI (FLUX.1-schnell),
-    upload to MinIO, and return a markdown image tag with a public URL.
+    Generate an image via Cloudflare Workers AI (FLUX.1-schnell).
+    Uploads to MinIO and returns a public URL. If MinIO upload fails or the
+    URL is unreachable from the container, falls back to a base64 data URL so
+    LibreChat can always display the image inline.
     """
     async with httpx.AsyncClient() as client:
         try:
             b64 = await _call_cloudflare(prompt, client)
             img_bytes = base64.b64decode(b64)
-            key = f"generated/{uuid.uuid4().hex}.jpg"
-            loop = asyncio.get_event_loop()
-            url = await loop.run_in_executor(
-                None, _minio_put_url, "images", key, img_bytes
-            )
-            return f"![generated image]({url})"
+            if len(img_bytes) < 100:
+                raise ValueError(f"Cloudflare returned too-small image ({len(img_bytes)} bytes)")
+            # Detect actual image format from magic bytes
+            if img_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                mime, ext = "image/png", "png"
+            else:
+                mime, ext = "image/jpeg", "jpg"
+            try:
+                key = f"generated/{uuid.uuid4().hex}.{ext}"
+                loop = asyncio.get_event_loop()
+                url = await loop.run_in_executor(
+                    None, _minio_put_url, "images", key, img_bytes
+                )
+                # Verify URL is reachable before returning it
+                check = await client.head(url, timeout=5.0)
+                if check.status_code == 200:
+                    return f"![generated image]({url})"
+            except Exception:
+                pass
+            # Fallback: inline data URL — always works regardless of MinIO state
+            b64_clean = base64.b64encode(img_bytes).decode()
+            return f"![generated image](data:{mime};base64,{b64_clean})"
         except Exception as exc:
             return f"Image generation failed: {exc}"
 
