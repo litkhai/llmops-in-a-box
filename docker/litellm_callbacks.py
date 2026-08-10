@@ -227,19 +227,16 @@ async def _generate_image(prompt: str) -> str:
                 mime, ext = "image/png", "png"
             else:
                 mime, ext = "image/jpeg", "jpg"
+            # Upload to MinIO for persistence, but always return data URL
+            # so LibreChat renders the image regardless of MinIO URL accessibility
             try:
                 key = f"generated/{uuid.uuid4().hex}.{ext}"
                 loop = asyncio.get_event_loop()
-                url = await loop.run_in_executor(
+                await loop.run_in_executor(
                     None, _minio_put_url, "images", key, img_bytes
                 )
-                # Verify URL is reachable before returning it
-                check = await client.head(url, timeout=5.0)
-                if check.status_code == 200:
-                    return f"![generated image]({url})"
             except Exception:
                 pass
-            # Fallback: inline data URL — always works regardless of MinIO state
             b64_clean = base64.b64encode(img_bytes).decode()
             return f"![generated image](data:{mime};base64,{b64_clean})"
         except Exception as exc:
