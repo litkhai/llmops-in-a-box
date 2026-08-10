@@ -27,9 +27,14 @@ model_list:
 
   - model_name: auto
     litellm_params:
-      model: qwen-7b
+      model: openai/Qwen/Qwen2.5-7B-Instruct
+      api_base: os.environ/VLLM_API_BASE
+      api_key: os.environ/VLLM_API_KEY
+      timeout: 60
     model_info:
       mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
   - model_name: dall-e-3
     litellm_params:
       model: cloudflare/@cf/black-forest-labs/flux-1-schnell
