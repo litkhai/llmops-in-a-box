@@ -37,7 +37,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 import json
 
@@ -51,6 +51,12 @@ _langfuse = Langfuse()  # reads LANGFUSE_* env vars already set in litellm conta
 _LATENCY_CAP_S  = 30.0     # latency_score = 0.0 at 30 s or above
 _JUDGE_MODEL    = "claude-haiku-4-5-20251001"
 _FEEDBACK_URL   = os.environ.get("FEEDBACK_SERVICE_URL", "http://feedback:8080")
+
+# ── dataset + annotation queue ────────────────────────────────────────────────
+_DATASET_NAME      = "auto-review"
+_REVIEW_THRESHOLD  = 0.5   # helpfulness below this → flagged for review
+_LANGFUSE_HOST     = os.environ.get("LANGFUSE_HOST", "http://langfuse-web:3000")
+_annotation_queue_id: Optional[str] = None
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 _ENGLISH_MODEL      = "qwen-7b"          # Latin (English, etc.) — RunPod
@@ -343,10 +349,11 @@ async def _judge_response(trace_id: str, messages: list, output: str) -> None:
             if not match:
                 return
             scores = json.loads(match.group())
+            helpfulness_val = round(max(0.0, min(1.0, float(scores.get("helpfulness", 0.5)))), 3)
             _langfuse.score(
                 trace_id=trace_id,
                 name="helpfulness",
-                value=round(max(0.0, min(1.0, float(scores.get("helpfulness", 0.5)))), 3),
+                value=helpfulness_val,
                 data_type="NUMERIC",
             )
             _langfuse.score(
@@ -356,6 +363,8 @@ async def _judge_response(trace_id: str, messages: list, output: str) -> None:
                 data_type="BOOLEAN",
             )
             _langfuse.flush()
+            if helpfulness_val < _REVIEW_THRESHOLD:
+                await _flag_for_review(trace_id, messages, f"low_helpfulness:{helpfulness_val:.2f}")
     except Exception:
         pass
 
@@ -377,6 +386,74 @@ async def _register_for_feedback(trace_id: str, content: str) -> None:
                 f"{_FEEDBACK_URL}/register",
                 json={"trace_id": trace_id, "content": content},
                 timeout=2.0,
+            )
+    except Exception:
+        pass
+
+
+# ── dataset + annotation queue helpers ───────────────────────────────────────
+
+async def _ensure_annotation_queue() -> Optional[str]:
+    """Get or create the 'low-quality-traces' annotation queue; cache its ID."""
+    global _annotation_queue_id
+    if _annotation_queue_id:
+        return _annotation_queue_id
+
+    pub = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+    sec = os.environ.get("LANGFUSE_SECRET_KEY", "")
+    if not pub or not sec:
+        return None
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{_LANGFUSE_HOST}/api/public/annotation-queues",
+                auth=(pub, sec),
+                timeout=5.0,
+            )
+            if r.status_code == 200:
+                for q in r.json().get("data", []):
+                    if q.get("name") == "low-quality-traces":
+                        _annotation_queue_id = q["id"]
+                        return _annotation_queue_id
+            r2 = await client.post(
+                f"{_LANGFUSE_HOST}/api/public/annotation-queues",
+                auth=(pub, sec),
+                json={"name": "low-quality-traces", "description": "Traces flagged for human review"},
+                timeout=5.0,
+            )
+            if r2.status_code in (200, 201):
+                _annotation_queue_id = r2.json().get("id")
+                return _annotation_queue_id
+    except Exception:
+        pass
+    return None
+
+
+async def _flag_for_review(trace_id: str, messages: list, reason: str) -> None:
+    """Add trace to the auto-review dataset and the annotation queue."""
+    try:
+        _langfuse.create_dataset_item(
+            dataset_name=_DATASET_NAME,
+            source_trace_id=trace_id,
+            input={"messages": messages[-3:] if len(messages) > 3 else messages},
+            metadata={"reason": reason},
+        )
+    except Exception:
+        pass
+
+    queue_id = await _ensure_annotation_queue()
+    if not queue_id:
+        return
+    pub = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+    sec = os.environ.get("LANGFUSE_SECRET_KEY", "")
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{_LANGFUSE_HOST}/api/public/annotation-queues/{queue_id}/items",
+                auth=(pub, sec),
+                json={"traceId": trace_id},
+                timeout=5.0,
             )
     except Exception:
         pass
@@ -579,11 +656,14 @@ class UnifiedRouter(litellm.CustomLogger):
             pass
 
         # ── scores ────────────────────────────────────────────────────────────
-        output = _extract_output(response_obj)
+        output   = _extract_output(response_obj)
+        messages = kwargs.get("messages") or []
         _score_routing(trace_id, tags)
         _score_language_consistency(trace_id, meta.get("detected_script", "latin"), output)
         _score_latency(trace_id, start_time, end_time)
-        asyncio.ensure_future(_judge_response(trace_id, kwargs.get("messages") or [], output))
+        if "fallback:true" in tags:
+            asyncio.ensure_future(_flag_for_review(trace_id, messages, "routing_fallback"))
+        asyncio.ensure_future(_judge_response(trace_id, messages, output))
         asyncio.ensure_future(_register_for_feedback(trace_id, output))
 
     async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception):
