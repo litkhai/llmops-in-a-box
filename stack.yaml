@@ -483,41 +483,6 @@ layers:
       kvcache_backend: s3       # LMCache → MinIO (storage layer, kvcache bucket)
       s3_bucket: kvcache
 
-  # ── NOT IN ANY PHASE — blocked on hardware. Read before enabling. ──
-  #
-  #  MinIO MemKV is a purpose-built context memory store for AI inference — a
-  #  petascale, flash-backed pool for the transformer KV cache. It moves
-  #  attention key/value blocks from GPU memory to NVMe over RDMA in 2-16 MB
-  #  blocks, bypassing file system and object protocols. Targets TTFT and TPOT
-  #  at fleet scale.
-  #
-  #  Hardware required: NVIDIA STX-based systems, Vera CPUs, Spectrum-X 800 GbE,
-  #  PCIe Gen6. No compose service, no RunPod pod, no GA date.
-  #  Only calls to action are "Talk to a Specialist" and "Get Pricing".
-  #
-  #  The buildable KV-cache path is the `cpu` + `kvcache` + `storage` combo in
-  #  Phase 4: llama.cpp (CPU) + LMCache + MinIO S3. Different mechanism —
-  #  open-source, runs today — but the architectural principle is the same:
-  #  KV blocks written to an S3-compatible store instead of recomputed.
-  #
-  #  DECIDED: stays a plan. Not scheduled, in no phase, in no profile.
-  #  Kept declared so the architecture has an honest answer for what happens
-  #  to KV cache at fleet scale, and so nobody reads this layer as one
-  #  `enabled: true` away from working.
-  memory:
-    phase: null                 # was 4 — see above
-    enabled: false
-    impl: memkv
-    managed_by: compose
-    compose_profile: memory
-    port: 9200
-    requires: [gateway]         # wrong for KV-cache offload: it sits under
-                                # the inference engine, not beside the gateway
-    options:
-      # These two describe a semantic cache, NOT MemKV. Kept verbatim so the
-      # mismatch stays visible instead of being quietly deleted.
-      semantic_cache: true
-      similarity_threshold: 0.95
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Model catalog — the ONE place models are defined.
@@ -713,10 +678,3 @@ health:
     - name: artifact-minio
       layer: storage
       url: http://{{host}}:9012/minio/health/live
-    # Placeholder, and known wrong — MemKV is not an HTTP service on this host.
-    # Left alongside the layer it belongs to rather than deleted, so the two
-    # get corrected together once the memory layer is resolved. See
-    # layers.memory.
-    - name: memkv
-      layer: memory
-      url: http://{{host}}:9200/health
