@@ -683,19 +683,22 @@ class UnifiedRouter(litellm.CustomLogger):
                 tags=tags,
                 session_id=session_id,
                 user_id=user_id or None,
-                metadata={"detected_script": meta.get("detected_script"), "routed_model": meta.get("routed_model"), "actual_model": actual_alias},
+                metadata={"detected_script": meta.get("detected_script"), "routed_model": meta.get("routed_model")},
                 input=None if is_image else kwargs.get("messages"),
                 output=None if is_image else _extract_output(response_obj),
             )
             if not is_image:
                 inp_tok = getattr(usage, "prompt_tokens", 0) or 0
                 out_tok = getattr(usage, "completion_tokens", 0) or 0
+                # routed_model is the alias we set in the pre-call hook;
+                # it's the only reliable model identifier available in the
+                # callback kwargs (response_obj.model echoes the original alias).
                 routed_alias = meta.get("routed_model", actual_alias)
                 in_rate, out_rate = _MODEL_COSTS.get(routed_alias, (0.0, 0.0))
                 gen = _langfuse.generation(
                     trace_id=trace_id,
-                    name=meta.get("generation_name", f"{actual_alias}/response"),
-                    model=actual,
+                    name=meta.get("generation_name", f"{routed_alias}/response"),
+                    model=routed_alias,
                     input=kwargs.get("messages"),
                     output=_extract_output(response_obj),
                     usage={
