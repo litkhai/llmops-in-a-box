@@ -140,8 +140,6 @@ profiles:
   # ── Convenience aliases, independent of phase ──
 
   # Everything currently implemented, whatever phase that is.
-  # `memory` is deliberately NOT listed — not "not built yet", blocked on
-  # NVIDIA STX hardware with no GA date. See layers.memory.
   full:
     description: Every layer whose `enabled` is true
     layers: [gateway, observability, ui, tools, cpu, storage, kvcache, serving]
