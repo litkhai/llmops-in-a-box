@@ -375,13 +375,15 @@ layers:
         - yanolja/EEVE-Korean-Instruct-10.8B-v1.0
 
   # ── Phase 2 — MCP tool layer ──
+  #
+  # Uses ClickHouse Cloud's built-in MCP endpoint directly — no local proxy
+  # container required.  LiteLLM connects over HTTPS to port 8443 using
+  # ClickHouse Cloud credentials assembled at container-start time.
   tools:
     phase: 2
     enabled: true
     impl: mcp
-    managed_by: compose
-    compose_profile: tools
-    port: 9100
+    managed_by: external
     requires: [gateway]
     options:
       # ClickHouse Cloud: agents can query the warehouse and every tool call
@@ -389,8 +391,8 @@ layers:
       servers:
         - name: clickhouse
           enabled: true
-          transport: sse
-          url_env: MCP_CLICKHOUSE_URL
+          transport: http
+          url_env: CLICKHOUSE_MCP_URL
           credentials_env: [CLICKHOUSE_CLOUD_HOST, CLICKHOUSE_CLOUD_USER, CLICKHOUSE_CLOUD_PASSWORD]
           scopes: [read_only]
 
@@ -625,7 +627,7 @@ secrets:
       - DOMAIN_BASE
       - DOMAIN_SSL_EMAIL
     2:
-      - MCP_CLICKHOUSE_URL
+      - CLICKHOUSE_CLOUD_HOST
       - CLICKHOUSE_CLOUD_USER
       - CLICKHOUSE_CLOUD_PASSWORD
     3:
@@ -634,6 +636,7 @@ secrets:
     4:
       - VLLM_API_BASE
       - VLLM_API_KEY
+      - RUNPOD_COST_PER_TOKEN
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Render targets for the model catalog.

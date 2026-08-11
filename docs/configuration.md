@@ -383,16 +383,18 @@ no per-client configuration required.
 flowchart LR
     LC["LibreChat / apps"]
     GW["LiteLLM Gateway\n:4000"]
-    MCP["mcp-clickhouse\n:9100 (internal)"]
-    CH["ClickHouse Cloud"]
+    CH["ClickHouse Cloud\n:8443/api/mcp"]
 
     LC --> GW
-    GW -- "MCP / SSE" --> MCP
-    MCP -- "SQL (CLICKHOUSE_SECURE=true)" --> CH
+    GW -- "MCP / HTTP (HTTPS)" --> CH
     GW -. "tool call traces" .-> LF["Langfuse"]
 ```
 
-`mcp-clickhouse` only supports stdio transport natively. The `docker/mcp/Dockerfile` wraps it with `mcp-proxy`, which exposes an SSE endpoint on port 9100 inside the Docker network. That port is **internal to the Docker network only** — no security group change is needed for the aws-ec2 target. LibreChat's SSRF protection is bypassed for this internal address by the `mcpSettings.allowedAddresses` entry that `render` adds to `docker/librechat.yaml`.
+ClickHouse Cloud exposes a native MCP endpoint at `https://<host>:8443/api/mcp`.
+LiteLLM connects directly — no local proxy container is required. Credentials are
+assembled at container-start time from `CLICKHOUSE_CLOUD_HOST`,
+`CLICKHOUSE_CLOUD_USER`, and `CLICKHOUSE_CLOUD_PASSWORD` into
+`CLICKHOUSE_MCP_URL` inside the LiteLLM service.
 
 ### stack.yaml — tools layer
 
@@ -402,14 +404,12 @@ layers:
     phase: 2
     enabled: true
     impl: mcp
-    managed_by: compose
-    compose_profile: tools
+    managed_by: external
     servers:
       clickhouse:
         enabled: true
-        image: mcp-clickhouse
-        port: 9100
-        transport: sse
+        transport: http
+        url_env: CLICKHOUSE_MCP_URL
 ```
 
 Enable this layer for `--profile phase-2`:
@@ -428,21 +428,15 @@ profiles:
 ```yaml title="docker/litellm_config.yaml (excerpt)"
 mcp_servers:
   clickhouse:
-    url: "http://mcp-clickhouse:9100/sse"
-    transport: "sse"
+    url: "os.environ/CLICKHOUSE_MCP_URL"
+    transport: "http"
 ```
 
-`render` also adds the following block to `docker/librechat.yaml` to exempt the internal Docker hostname from LibreChat's SSRF protection:
+`CLICKHOUSE_MCP_URL` is constructed in `docker-compose.yml` from the individual
+ClickHouse Cloud credential env vars:
 
-```yaml title="docker/librechat.yaml (excerpt)"
-mcpSettings:
-  allowedAddresses:
-    - "mcp-clickhouse:9100"
-
-mcpServers:
-  clickhouse:
-    type: sse
-    url: "http://mcp-clickhouse:9100/sse"
+```
+https://<CLICKHOUSE_CLOUD_USER>:<CLICKHOUSE_CLOUD_PASSWORD>@<CLICKHOUSE_CLOUD_HOST>:8443/api/mcp
 ```
 
 ### Deploying Phase 2

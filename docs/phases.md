@@ -112,8 +112,9 @@ The profile starts nine local containers: LiteLLM, LibreChat, the feedback sidec
 
 ## Phase 2 — MCP tool layer
 
-**Adds:** `mcp-clickhouse` service (port 9100, internal network only) with SSE
-transport, wired into the LiteLLM gateway via `mcp_servers`.
+**Adds:** ClickHouse Cloud native MCP endpoint wired into the LiteLLM gateway
+via `mcp_servers`. No additional container is required — LiteLLM connects
+directly to `https://<host>:8443/api/mcp` over HTTPS.
 
 **Target:** `aws-ec2` only. Phase 2 requires the EC2 target; see
 [Getting started — Moving to Phase 2](getting-started.md#moving-to-phase-2).
@@ -125,20 +126,18 @@ Deploy with:
 ./scripts/stack.sh up --profile phase-2 --target aws-ec2
 ```
 
-The `mcp-clickhouse` container is built from `docker/mcp/Dockerfile`
-(`python:3.12-slim` + `mcp-clickhouse` package) and connects to ClickHouse
-Cloud via `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, and
-`CLICKHOUSE_SECURE=true`. Tool access is declared at the **gateway** layer, not
-at the client: every app reaching LiteLLM inherits the same tools
-automatically.
+Tool access is declared at the **gateway** layer, not at the client: every app
+reaching LiteLLM inherits the same tools automatically. Credentials are
+assembled at container-start time from `CLICKHOUSE_CLOUD_HOST`,
+`CLICKHOUSE_CLOUD_USER`, and `CLICKHOUSE_CLOUD_PASSWORD` into
+`CLICKHOUSE_MCP_URL` inside the LiteLLM service environment.
 
 All tool calls are traced through LiteLLM → Langfuse alongside the model calls
 that triggered them.
 
 Acceptance criteria:
 
-- `mcp-clickhouse` starts and the gateway reports the `clickhouse` server in
-  its MCP server list
+- the gateway reports the `clickhouse` server in its MCP server list
 - an agent answers a question that requires ClickHouse data without any
   client-side tool wiring
 - the Langfuse trace contains the tool arguments, result, latency, and failure

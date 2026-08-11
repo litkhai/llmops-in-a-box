@@ -61,9 +61,14 @@ _annotation_queue_id: Optional[str] = None
 # ── model costs (must match litellm_config.yaml model_info) ──────────────────
 # Used to pass explicit cost to Langfuse so the cost dashboard populates
 # regardless of whether Langfuse's model registry recognises the model name.
+# RUNPOD_COST_PER_TOKEN: approximate per-token cost for RunPod GPU time.
+# Example: RTX 4090 at $0.44/hr, ~800 tok/s → 0.44/(800*3600) ≈ 1.5e-7.
+# Set in .env alongside VLLM_API_BASE. Defaults to 0 (cost tracked by pod-hour
+# externally, not per-token here).
+_RUNPOD_COST = float(os.environ.get("RUNPOD_COST_PER_TOKEN", "0") or "0")
 _MODEL_COSTS: Dict[str, tuple] = {
-    "claude-sonnet": (3e-06, 1.5e-05),   # (input $/token, output $/token)
-    "qwen-7b":       (0.0,   0.0),
+    "claude-sonnet": (3e-06, 1.5e-05),       # (input $/token, output $/token)
+    "qwen-7b":       (_RUNPOD_COST, _RUNPOD_COST),  # RunPod GPU; set via env
 }
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
@@ -536,7 +541,10 @@ class UnifiedRouter(litellm.CustomLogger):
             data["metadata"]["routed_model"]    = _ENGLISH_MODEL
             data["metadata"]["trace_name"]      = "chat/tool-use"
             data["metadata"]["generation_name"] = f"{_ENGLISH_MODEL}/response"
-            data["metadata"]["tags"]            = ["script:tool-use", f"routed:{_ENGLISH_MODEL}"]
+            _tool_tags = ["script:tool-use", f"routed:{_ENGLISH_MODEL}"]
+            if _VLLM_ACTIVE and _ENGLISH_MODEL == "qwen-7b":
+                _tool_tags.append("provider:runpod")
+            data["metadata"]["tags"]            = _tool_tags
             _span(trace_id, "routing", {"script": "tool-use", "tools": [t.get("function", {}).get("name") for t in (data.get("tools") or [])]}, {"routed": _ENGLISH_MODEL})
             # Log any tool results from LibreChat's agentic loop as individual spans.
             for msg in messages:
@@ -569,11 +577,14 @@ class UnifiedRouter(litellm.CustomLogger):
             routed = _ENGLISH_MODEL
         data["model"] = routed
 
+        tags = [f"script:{script}", f"routed:{routed}"]
+        if _VLLM_ACTIVE and routed == "qwen-7b":
+            tags.append("provider:runpod")
         data["metadata"]["detected_script"] = script
         data["metadata"]["routed_model"]    = routed
         data["metadata"]["trace_name"]      = f"chat/{script}"
         data["metadata"]["generation_name"] = f"{routed}/response"
-        data["metadata"]["tags"]            = [f"script:{script}", f"routed:{routed}"]
+        data["metadata"]["tags"]            = tags
         _span(trace_id, "routing", {"script": script, "message_preview": last_user[:200]}, {"routed": routed})
 
         return data
