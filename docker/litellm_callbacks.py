@@ -58,6 +58,14 @@ _REVIEW_THRESHOLD  = 0.5   # helpfulness below this → flagged for review
 _LANGFUSE_HOST     = os.environ.get("LANGFUSE_HOST", "http://langfuse-web:3000")
 _annotation_queue_id: Optional[str] = None
 
+# ── model costs (must match litellm_config.yaml model_info) ──────────────────
+# Used to pass explicit cost to Langfuse so the cost dashboard populates
+# regardless of whether Langfuse's model registry recognises the model name.
+_MODEL_COSTS: Dict[str, tuple] = {
+    "claude-sonnet": (3e-06, 1.5e-05),   # (input $/token, output $/token)
+    "qwen-7b":       (0.0,   0.0),
+}
+
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
 # Phase 4 (RunPod) activates qwen-7b; fall back to claude-sonnet when VLLM is
 # not configured (Phase 1).
@@ -643,7 +651,14 @@ class UnifiedRouter(litellm.CustomLogger):
         if not meta.get("routed_model"):
             return
 
-        actual = getattr(response_obj, "model", None) or kwargs.get("model", "")
+        # Use litellm_params.model for the actual provider model string
+        # (e.g. "anthropic/claude-sonnet-4-5") because response_obj.model echoes
+        # the original alias ("auto") before pre-call hook routing took effect.
+        actual = (
+            (kwargs.get("litellm_params") or {}).get("model")
+            or getattr(response_obj, "model", None)
+            or kwargs.get("model", "")
+        )
         actual_alias = actual.split("/")[-1] if "/" in actual else actual
 
         tags = list(meta.get("tags") or [])
@@ -673,6 +688,10 @@ class UnifiedRouter(litellm.CustomLogger):
                 output=None if is_image else _extract_output(response_obj),
             )
             if not is_image:
+                inp_tok = getattr(usage, "prompt_tokens", 0) or 0
+                out_tok = getattr(usage, "completion_tokens", 0) or 0
+                routed_alias = meta.get("routed_model", actual_alias)
+                in_rate, out_rate = _MODEL_COSTS.get(routed_alias, (0.0, 0.0))
                 gen = _langfuse.generation(
                     trace_id=trace_id,
                     name=meta.get("generation_name", f"{actual_alias}/response"),
@@ -680,9 +699,12 @@ class UnifiedRouter(litellm.CustomLogger):
                     input=kwargs.get("messages"),
                     output=_extract_output(response_obj),
                     usage={
-                        "input": getattr(usage, "prompt_tokens", 0),
-                        "output": getattr(usage, "completion_tokens", 0),
-                        "total": getattr(usage, "total_tokens", 0),
+                        "input": inp_tok,
+                        "output": out_tok,
+                        "total": inp_tok + out_tok,
+                        "input_cost": round(inp_tok * in_rate, 8),
+                        "output_cost": round(out_tok * out_rate, 8),
+                        "total_cost": round(inp_tok * in_rate + out_tok * out_rate, 8),
                     } if usage else None,
                     start_time=start_time,
                     end_time=end_time,
