@@ -258,7 +258,8 @@ flowchart LR
 - OpenAI and Anthropic provide model inference.
 - Cloudflare Workers AI (FLUX.1-schnell) generates images on demand; results
   are uploaded to MinIO and served via `media.<domain>`.
-- Langfuse records traces, tokens, latency, cost, and failures.
+- Langfuse records traces, sessions, tokens, latency, cost, failures, and five automated scores per completion.
+- A feedback sidecar correlates LibreChat user ratings to Langfuse trace IDs via content hash.
 - **ClickHouse Cloud** (`llmops` database) stores trace analytics. Postgres, Redis, and MinIO run locally for Langfuse's application data.
 
 !!! warning "Phase 1 is not an air-gapped deployment"
@@ -275,7 +276,7 @@ flowchart LR
 
 | Phase | Outcome | Target | Status |
 |:--:|---|---|---|
-| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | Docker or EC2 | In progress |
+| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | Docker or EC2 | Running (EC2) |
 | <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | EC2 | Runnable — ClickHouse Cloud via MCP |
 | <span class="phase phase-3">3</span> | CPU serving (llama.cpp) and MinIO KV cache | EC2 | Not built yet |
 | <span class="phase phase-4">4</span> | GPU serving on RunPod | EC2 + RunPod | Not built yet |
