@@ -66,7 +66,7 @@ are cumulative.
 
 | Phase | Outcome | Target | Status |
 |:--:|---|---|---|
-| 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Runnable** |
+| 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Running** (EC2) |
 | 2 | MCP tool layer | EC2 | **Runnable — ClickHouse Cloud via MCP** |
 | 3 | CPU serving and MinIO KV cache | EC2 | Not built yet |
 | 4 | GPU serving on RunPod | EC2 + RunPod | Not built yet |
@@ -98,8 +98,12 @@ Acceptance criteria:
 - every completion trace carries five automated scores: `routing_accuracy`,
   `language_consistency`, `latency_score`, `helpfulness`, and
   `judge_language_match`
+- sessions grouped by user ID are visible in Langfuse
+- GENERATION observations carry model name, token counts, and cost
+- user ratings submitted through the feedback sidecar correlate to Langfuse trace IDs
+- the judge prompt (`judge-v1`) is versioned in Langfuse's prompt catalog
 
-The profile starts eight local containers. Langfuse connects to **ClickHouse Cloud** for trace analytics (`llmops` database) and runs Postgres, Redis, MinIO, MongoDB, and a worker locally. LibreChat adds MongoDB.
+The profile starts nine local containers: LiteLLM, LibreChat, the feedback sidecar, and six Langfuse services (web, worker, Postgres, Redis, MinIO, MongoDB). Langfuse connects to **ClickHouse Cloud** for trace analytics (`llmops` database) — there is no local ClickHouse container.
 
 !!! warning "Phase 1 is not sovereign"
     Every model request goes to OpenAI or Anthropic. The gateway and tracing
@@ -190,13 +194,6 @@ Acceptance criteria:
 - a warm-start request for a repeated prompt prefix shows lower TTFT than a
   cold start
 - KV-cache bucket usage is visible in the MinIO console
-
-!!! note "MinIO MemKV — fleet-scale KV offload"
-    MinIO MemKV (flash-backed, RDMA, petascale) is architecturally the next
-    step after Phase 3b, but requires NVIDIA STX hardware with no current GA
-    availability. It is kept as a declared layer (`layers.memory` in
-    `stack.yaml`) so the architecture has an honest answer at fleet scale, but
-    it is not scheduled and is not in any profile.
 
 ## Phase 4 — GPU serving on RunPod
 
