@@ -302,23 +302,15 @@ Every completion trace receives five scores automatically. No client change is n
 
 **LLM-as-judge (asynchronous)** — `helpfulness` and `judge_language_match` are computed by a direct call to the Anthropic API (`claude-haiku-4-5-20251001`). The call is dispatched as a fire-and-forget `asyncio.Task` so it does not block the response path. The judge calls Anthropic directly via `httpx` rather than through LiteLLM to avoid triggering the scoring callbacks recursively.
 
-**User feedback (sidecar)** — a lightweight FastAPI service (`feedback`) runs alongside the gateway. It maintains a content-hash → trace-id index, populated automatically when each response is logged. LibreChat feedback can be correlated to a Langfuse trace by posting the response text:
+**User feedback (sidecar)** — a lightweight FastAPI service (`feedback`) runs alongside the gateway. It maintains a SHA-256(content[:500]) → trace-id index. The LiteLLM callback populates the index automatically after each response via `POST /register`. LibreChat feedback can be correlated to a Langfuse trace by posting the response text to `POST /feedback`:
 
 ```bash
-curl -X POST http://localhost:8080/score \
+curl -X POST http://localhost:8080/feedback \
   -H "Content-Type: application/json" \
-  -d '{"content": "<first 300 chars of response>", "value": 1, "comment": "helpful"}'
+  -d '{"content": "<first 500 chars of response>", "rating": 1}'
 ```
 
-Or by trace ID directly:
-
-```bash
-curl -X POST http://localhost:8080/score-by-id \
-  -H "Content-Type: application/json" \
-  -d '{"trace_id": "<langfuse-trace-id>", "value": 1, "comment": "helpful"}'
-```
-
-The service accepts `value` as `1` (thumbs-up) or `0` (thumbs-down).
+The service accepts `rating` as `1` (thumbs-up) or `-1` (thumbs-down).
 
 ### Implementation notes
 

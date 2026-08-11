@@ -7,7 +7,7 @@ A composable LLMOps reference stack built around a single gateway:
 - **LibreChat** for the user interface
 - **OpenAI and Anthropic** for chat, **Cloudflare Workers AI** for image generation, and **MinIO** for image storage — running today
 - **ClickHouse Cloud** as the first MCP tool server, wired into the gateway — running today
-- **llama.cpp, MinIO AIStor, LMCache** for CPU serving and KV cache in Phase 3
+- **llama.cpp** with **LMCache** KV offload to **MinIO AIStor** for CPU serving in Phase 3
 - **vLLM and RunPod** for GPU serving in Phase 4
 
 The phases are a build order rather than a menu. The destination is an agent
@@ -31,10 +31,11 @@ names, and deployment targets.
 
 | Scope | Target | Status |
 |---|---|---|
-| Phase 1 — gateway, UI, tracing | Docker or EC2 | Runnable |
+| Phase 1 — gateway, UI, tracing | Docker or EC2 | Running (EC2 + Docker) |
 | OpenAI / Anthropic requests through LiteLLM | — | Requires at least one provider key |
 | Image generation (Cloudflare Workers AI FLUX.1-schnell) | — | Runnable; free-tier tokens optional |
 | LiteLLM → Langfuse tracing | — | Runnable |
+| User feedback sidecar (ratings → Langfuse scores) | — | Running |
 | Phase 2 — MCP tool layer (ClickHouse Cloud) | EC2 | Runnable |
 | Phase 3 — CPU serving and MinIO KV cache | EC2 | Not built yet |
 | Phase 4 — GPU serving on RunPod | EC2 + RunPod | Not built yet |
@@ -90,6 +91,7 @@ LibreChat / applications
 LiteLLM Gateway ──────────── traces ─────────▶ Langfuse
 (UnifiedRouter callback)                           │
         │                                       ClickHouse · Postgres · Redis · MinIO
+        │                                   feedback sidecar (ratings → Langfuse scores)
         ├─ auto · English/CJK text ──▶ qwen-7b (RunPod Serverless)
         ├─ auto · Korean text   ──▶ claude-sonnet
         ├─ auto · image keywords ─▶ Cloudflare FLUX.1-schnell  (p.1)
