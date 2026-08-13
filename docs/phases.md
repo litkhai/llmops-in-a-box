@@ -33,23 +33,19 @@ When the build-out is complete, one `stack.yaml` describes a stack in which:
 The last bullet is the destination, not an extra feature. Every layer before it
 exists to make it possible: the gateway is the one place that both measures a
 request and decides where it goes, tracing turns quality into data instead of
-anecdote, self-hosted serving makes a judge affordable to run on every sampled
-request and keeps prompts inside the boundary, and the artifact store holds the
-datasets the judge is calibrated against.
+anecdote, and self-hosted serving makes a judge affordable to run on every sampled
+request and keeps prompts inside the boundary.
 
-Two acceptance tests bound the arc:
+One acceptance test bounds the arc:
 
 | Test | What it proves | Made possible by |
 |---|---|---|
-| `--profile airgapped` resolves to a working stack with no commercial model and no commercial fallback anywhere in the generated config | the boundary is real, not configured | Phase 3 (CPU) |
-| An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 5 |
+| An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 4 |
 
-Neither passes today. The first cannot, because there is no self-hosted model to
-fall back to. The second is partially in place: Phase 1 now computes five
-automated scores per trace (routing accuracy, language consistency, latency, and
-two LLM-as-judge scores), and a user-feedback sidecar attaches ratings from
-LibreChat to those same traces. The scores exist; routing does not yet act on
-them. That last step is Phase 5.5.
+This is partially in place: Phase 1 now computes five automated scores per trace
+(routing accuracy, language consistency, latency, and two LLM-as-judge scores),
+and a user-feedback sidecar attaches ratings from LibreChat to those same traces.
+The scores exist; routing does not yet act on them. That last step is Phase 4.5.
 
 ## Order and current state
 
@@ -68,13 +64,12 @@ are cumulative.
 |:--:|---|---|---|
 | 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Running** (EC2) |
 | 2 | MCP tool layer | EC2 | **Runnable — ClickHouse Cloud via MCP** |
-| 3 | CPU serving and MinIO KV cache | EC2 | Not built yet |
-| 4 | GPU serving on RunPod | EC2 + RunPod | Not built yet |
-| 5 | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
+| 3 | GPU serving on RunPod | EC2 + RunPod | **Running** (EC2 + RunPod) |
+| 4 | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
 
 Phase 1 runs on either `--target docker` (local) or `--target aws-ec2`. Phase 2
-and above require EC2: CPU inference is impractically slow on a laptop, and
-RunPod is an external service regardless of where the gateway lives.
+and above require EC2, and RunPod is an external service regardless of where the
+gateway lives.
 
 The Kubernetes deployment artifact is not implemented. A profile can describe a
 layer before that layer is runnable; `stack.sh` warns and skips disabled layers.
@@ -112,9 +107,8 @@ The profile starts nine local containers: LiteLLM, LibreChat, the feedback sidec
 
 ## Phase 2 — MCP tool layer
 
-**Adds:** ClickHouse Cloud native MCP endpoint wired into the LiteLLM gateway
-via `mcp_servers`. No additional container is required — LiteLLM connects
-directly to `https://<host>:8443/api/mcp` over HTTPS.
+**Adds:** `mcp-clickhouse` service (port 9100, internal network only) with SSE
+transport, wired into the LiteLLM gateway via `mcp_servers`.
 
 **Target:** `aws-ec2` only. Phase 2 requires the EC2 target; see
 [Getting started — Moving to Phase 2](getting-started.md#moving-to-phase-2).
@@ -126,18 +120,20 @@ Deploy with:
 ./scripts/stack.sh up --profile phase-2 --target aws-ec2
 ```
 
-Tool access is declared at the **gateway** layer, not at the client: every app
-reaching LiteLLM inherits the same tools automatically. Credentials are
-assembled at container-start time from `CLICKHOUSE_CLOUD_HOST`,
-`CLICKHOUSE_CLOUD_USER`, and `CLICKHOUSE_CLOUD_PASSWORD` into
-`CLICKHOUSE_MCP_URL` inside the LiteLLM service environment.
+The `mcp-clickhouse` container is built from `docker/mcp/Dockerfile`
+(`python:3.12-slim` + `mcp-clickhouse` + `mcp-proxy` packages) and connects to
+ClickHouse Cloud via `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`,
+and `CLICKHOUSE_SECURE=true`. Tool access is declared at the **gateway** layer,
+not at the client: every app reaching LiteLLM inherits the same tools
+automatically.
 
 All tool calls are traced through LiteLLM → Langfuse alongside the model calls
 that triggered them.
 
 Acceptance criteria:
 
-- the gateway reports the `clickhouse` server in its MCP server list
+- `mcp-clickhouse` starts and the gateway reports the `clickhouse` server in
+  its MCP server list
 - an agent answers a question that requires ClickHouse data without any
   client-side tool wiring
 - the Langfuse trace contains the tool arguments, result, latency, and failure
@@ -147,86 +143,38 @@ Acceptance criteria:
 Prompt instructions are not access control. The MCP credential's database
 grants determine what the agent can do.
 
-## Phase 3 — CPU serving and MinIO KV cache
+## Phase 3 — GPU serving on RunPod
 
-**Adds:** `qwen-0.5b` served by llama.cpp on the EC2 instance's CPU, MinIO
-AIStor for artifacts, and LMCache writing KV blocks to MinIO S3.
-
-**Target:** `aws-ec2` only. CPU inference runs on the EC2 instance's own CPUs
-(4 vCPUs on `t3.xlarge`); running it on a laptop is impractically slow.
-
-Runs entirely on existing EC2 infrastructure — no external GPU pod or account
-needed. Phase 3 can be built immediately after Phase 2.
-
-### Phase 3a — CPU inference (llama.cpp)
-
-`llama.cpp` runs as a compose service on the EC2 instance, exposing an
-OpenAI-compatible endpoint on port 8080 (Docker network only). The model is
-Qwen2.5-0.5B-Instruct (Q4\_K\_M GGUF, ~0.4 GiB), small enough to leave
-headroom for the rest of the stack on a `t3.xlarge`. Larger quantized models
-(1.5B, 3B) work on a larger instance type.
-
-Acceptance criteria:
-
-- `qwen-0.5b` responds through the LiteLLM gateway alongside `claude-sonnet`
-- no GPU pod required
-- CPU model appears in Langfuse traces with zero marginal cost
-- `--profile airgapped` resolves to a working stack using only `qwen-0.5b`
-
-### Phase 3b — MinIO KV cache
-
-LMCache runs in-process with llama.cpp and offloads transformer KV blocks to
-the `kvcache` bucket in the Phase 3 MinIO AIStor instance. Because the serving
-and object store are co-located on the same EC2 instance, there is no network
-penalty for fetching cached blocks.
-
-The artifact store is separate from the MinIO instance internal to Langfuse:
-
-| Langfuse MinIO | Phase 3 store |
-|---|---|
-| Owned by Langfuse | Owned by the stack operator |
-| Trace and media internals | Datasets, eval artifacts, model weights, KV cache |
-| Lifecycle follows Langfuse | Independent retention and backup policy |
-
-Acceptance criteria:
-
-- a warm-start request for a repeated prompt prefix shows lower TTFT than a
-  cold start
-- KV-cache bucket usage is visible in the MinIO console
-
-## Phase 4 — GPU serving on RunPod
-
-**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint, alongside the Phase 3
-CPU path and the commercial APIs.
+**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint alongside the commercial
+APIs. Language routing directs Korean to `claude-sonnet` and English/CJK to
+`qwen-7b`.
 
 **Target:** `aws-ec2` + RunPod. The gateway and observability stack run on EC2;
 the GPU inference endpoint is provisioned separately on RunPod.
 
-The serving layer is externally managed rather than a Compose container.
-LiteLLM needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The
-GPU pod is provisioned in the RunPod console; nothing in this repository
-changes. KV-cache stays pod-local (CPU RAM + NVMe on the pod) — do not
-route it to the EC2 instance's MinIO over the internet.
+The serving layer is externally managed — not a Compose container. LiteLLM
+needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The GPU pod is
+provisioned in the RunPod console; nothing in this repository changes.
 
 Acceptance criteria:
 
-- `claude-sonnet`, `qwen-0.5b`, and `qwen-7b` use the same client
-  protocol and all appear in one Langfuse project
-- GPU runtime cost is reported separately from Langfuse's per-token data
-- Phase 3 layers continue to function when the RunPod pod is not running
+- `claude-sonnet` and `qwen-7b` use the same client protocol and both appear in
+  one Langfuse project
+- traces for `qwen-7b` carry the `provider:runpod` tag
+- `qwen-7b` falls back to `claude-sonnet` when the RunPod pod is stopped
+- GPU runtime cost is configurable via `RUNPOD_COST_PER_TOKEN`
 
-`qwen-7b` can fall back to `claude-sonnet` in connected profiles (600 s timeout
-accounts for RunPod cold start). The renderer must prune that fallback in
-`airgapped`; a stopped remote model should fail rather than silently egress.
+`qwen-7b` falls back to `claude-sonnet` in connected profiles (600 s timeout
+accounts for RunPod cold start).
 
-## Phase 5 — Operating recipes
+## Phase 4 — Operating recipes
 
-Phase 5 adds no infrastructure layer. It demonstrates how to operate the
-gateway, tools, serving, and trace data built earlier — and in 5.5 it joins
+Phase 4 adds no infrastructure layer. It demonstrates how to operate the
+gateway, tools, serving, and trace data built earlier — and in 4.4 it joins
 routing to scoring, which is the capability the earlier phases were building
 toward.
 
-### 5.1 Context-based routing in LiteLLM
+### 4.1 Context-based routing in LiteLLM
 
 Start with deterministic rules: explicit tenant policy, requested capability,
 context-window fit, health, and budget. LiteLLM can route an over-length
@@ -260,21 +208,21 @@ Acceptance criteria:
 - short and over-length requests select models that can serve them
 - route decisions and classifier confidence are observable
 - low-confidence or failed classification takes a safe default
-- `airgapped` never introduces a commercial candidate
+- self-hosted-only routing never introduces a commercial candidate
 
-### 5.2 LibreChat Agents over the MCP tool layer
+### 4.2 LibreChat Agents over the MCP tool layer
 
 Configure an agent with the Phase 2 MCP server and verify that one trace
 contains planning, tool use, and the final response. Use only the dedicated
 read-only database credential.
 
-### 5.3 Langfuse evaluations
+### 4.3 Langfuse evaluations
 
 Create a dataset from real traces, apply an explicit scoring rubric, and compare
 cost and quality across the same inputs. Record the judge model; using a model
 to judge itself can bias the result.
 
-### 5.4 Guardrails at the gateway
+### 4.4 Guardrails at the gateway
 
 Gateway guardrails cover every client. PII and prompt-injection checks must run
 before a request leaves the boundary; output moderation runs after inference.
@@ -287,9 +235,9 @@ Acceptance criteria:
 - the trace shows which guardrail ran and its outcome
 - false positives, false negatives, and latency are measured
 
-### 5.5 Closing the loop — judge-scored routing
+### 4.5 Closing the loop — judge-scored routing
 
-5.1 decides where a request goes. 5.3 decides how good the answer was. Joining
+4.1 decides where a request goes. 4.3 decides how good the answer was. Joining
 them is the point of the build-out: scores stop being a dashboard and become an
 input to routing.
 
@@ -312,19 +260,19 @@ latency only where a wrong answer costs more than a slow one.
 Constraints that do not relax:
 
 - **A judge score must not control residency, security, or hard budget
-  boundaries.** This is the same rule 5.1 applies to the intent classifier.
+  boundaries.** This is the same rule 4.1 applies to the intent classifier.
   Quality may choose among already-permitted routes; it may not widen the
   permitted set.
 - **The judge is a model, so it is traced and costed like any other call.** Its
   spend belongs in the same Langfuse view as the traffic it judges, or the
   loop's own cost stays invisible while it changes routing.
-- **A model judging its own output biases the result** (5.3). If the judge and a
+- **A model judging its own output biases the result** (4.3). If the judge and a
   candidate route are the same model, that comparison is not neutral.
 - **Sample until judge/human agreement is measured.** An unvalidated judge
   driving automated routing is an unmeasured system changing its own behaviour.
-- **`airgapped` requires a self-hosted judge.** A hosted judge API receives the
-  prompt and the completion, so it defeats the boundary for exactly the reason
-  a hosted guardrail does in 5.4.
+- **A hosted judge defeats sovereignty.** A hosted judge API receives the prompt
+  and the completion, so it defeats the network boundary for exactly the reason
+  a hosted guardrail does in 4.4. Use the self-hosted serving layer as the judge.
 
 Acceptance criteria:
 
@@ -334,19 +282,15 @@ Acceptance criteria:
 - judge spend appears as its own line beside serving cost
 - judge/human agreement is measured on a sample before any automated routing
   change is enabled
-- `airgapped` resolves a self-hosted judge, or scoring is disabled in that
-  profile rather than silently egressing
 
 ## Profiles
 
 | Profile | Layers | Models |
 |---|---|---|
 | `phase-1` | gateway, observability, UI | `claude-sonnet` |
-| `phase-2` | Phase 1 + tools | frontier models |
-| `phase-3` | Phase 2 + CPU serving + storage + KV cache | frontier models + `qwen-0.5b` |
-| `phase-4` | Phase 3 + GPU serving (RunPod) | all |
-| `phase-5` | Same infrastructure as Phase 4 | all |
+| `phase-2` | Phase 1 + tools | `claude-sonnet` |
+| `phase-3` | Phase 2 + GPU serving (RunPod) | `claude-sonnet` + `qwen-7b` |
+| `phase-4` | Same infrastructure as Phase 3 | all |
 | `headless` | gateway and observability | enabled models |
-| `airgapped` | gateway, observability, UI, CPU serving | `qwen-0.5b` only |
 
 `stack.yaml` remains authoritative for exact membership and current status.

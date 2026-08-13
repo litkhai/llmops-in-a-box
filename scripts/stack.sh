@@ -368,9 +368,8 @@ render_litellm() {
           has_mcp=1
         fi
         transport="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .transport")"
-        url_env="$(q ".layers.tools.options.servers[] | select(.name == \"$srv_name\") | .url_env")"
         printf '  %s:\n' "$srv_name"
-        printf '    url: "os.environ/%s"\n' "$url_env"
+        printf '    url: "http://mcp-%s:9100/sse"\n' "$srv_name"
         printf '    transport: "%s"\n' "$transport"
       done < <(q '.layers.tools.options.servers[].name')
     fi

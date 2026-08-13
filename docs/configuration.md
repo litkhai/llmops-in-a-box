@@ -383,18 +383,19 @@ no per-client configuration required.
 flowchart LR
     LC["LibreChat / apps"]
     GW["LiteLLM Gateway\n:4000"]
-    CH["ClickHouse Cloud\n:8443/api/mcp"]
+    MCP["mcp-clickhouse\n:9100 (internal)"]
+    CH["ClickHouse Cloud"]
 
     LC --> GW
-    GW -- "MCP / HTTP (HTTPS)" --> CH
+    GW -- "MCP / SSE" --> MCP
+    MCP -- "SQL (CLICKHOUSE_SECURE=true)" --> CH
     GW -. "tool call traces" .-> LF["Langfuse"]
 ```
 
-ClickHouse Cloud exposes a native MCP endpoint at `https://<host>:8443/api/mcp`.
-LiteLLM connects directly — no local proxy container is required. Credentials are
-assembled at container-start time from `CLICKHOUSE_CLOUD_HOST`,
-`CLICKHOUSE_CLOUD_USER`, and `CLICKHOUSE_CLOUD_PASSWORD` into
-`CLICKHOUSE_MCP_URL` inside the LiteLLM service.
+`mcp-clickhouse` (official ClickHouse MCP server) connects to ClickHouse Cloud
+as a database client and exposes an SSE endpoint on port 9100 inside the Docker
+network. `mcp-proxy` wraps its stdio transport. That port is internal to the
+Docker network — no security group change needed for the aws-ec2 target.
 
 ### stack.yaml — tools layer
 
@@ -404,12 +405,13 @@ layers:
     phase: 2
     enabled: true
     impl: mcp
-    managed_by: external
+    managed_by: compose
+    compose_profile: tools
     servers:
       clickhouse:
         enabled: true
-        transport: http
-        url_env: CLICKHOUSE_MCP_URL
+        transport: sse
+        url_env: MCP_CLICKHOUSE_URL
 ```
 
 Enable this layer for `--profile phase-2`:
@@ -428,15 +430,8 @@ profiles:
 ```yaml title="docker/litellm_config.yaml (excerpt)"
 mcp_servers:
   clickhouse:
-    url: "os.environ/CLICKHOUSE_MCP_URL"
-    transport: "http"
-```
-
-`CLICKHOUSE_MCP_URL` is constructed in `docker-compose.yml` from the individual
-ClickHouse Cloud credential env vars:
-
-```
-https://<CLICKHOUSE_CLOUD_USER>:<CLICKHOUSE_CLOUD_PASSWORD>@<CLICKHOUSE_CLOUD_HOST>:8443/api/mcp
+    url: "http://mcp-clickhouse:9100/sse"
+    transport: "sse"
 ```
 
 ### Deploying Phase 2

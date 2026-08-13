@@ -314,9 +314,6 @@ services:
       VLLM_API_KEY: ${VLLM_API_KEY:-}
       RUNPOD_COST_PER_TOKEN: ${RUNPOD_COST_PER_TOKEN:-0}
 
-      # Phase 2 MCP — ClickHouse Cloud native endpoint (no local proxy container).
-      # Assembled from individual cloud credentials so they stay separate in .env.
-      CLICKHOUSE_MCP_URL: "https://${CLICKHOUSE_CLOUD_USER:-}:${CLICKHOUSE_CLOUD_PASSWORD:-}@${CLICKHOUSE_CLOUD_HOST:-}:8443/api/mcp"
 
       # Image generation — Cloudflare Workers AI (optional; leave blank to disable).
       CF_API_TOKEN: ${CF_API_TOKEN:-}
@@ -441,6 +438,33 @@ services:
       timeout: 5s
       retries: 30
       start_period: 40s
+
+  # ══ tools — MCP server layer (Phase 2) ═══════════════════════════════════════
+  #
+  # mcp-clickhouse (official ClickHouse MCP server) exposes ClickHouse Cloud
+  # as MCP tools. mcp-proxy wraps its stdio transport as SSE on port 9100.
+  # Start with --profile tools or ./scripts/stack.sh up --profile phase-2.
+
+  mcp-clickhouse:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    profiles: [tools]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_HOST: ${CLICKHOUSE_CLOUD_HOST:-}
+      CLICKHOUSE_USER: ${CLICKHOUSE_CLOUD_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_CLOUD_PASSWORD:-}
+      CLICKHOUSE_SECURE: "true"
+      CLICKHOUSE_VERIFY: "true"
+    ports:
+      - "0.0.0.0:9100:9100"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://0.0.0.0:9100/sse',timeout=3); sys.exit(0 if r.status in (200,405) else 1)\" 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ── Caddy reverse proxy (aws-ec2 only) ───────────────────────────────────────
   #

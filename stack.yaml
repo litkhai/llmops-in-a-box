@@ -55,32 +55,23 @@ phases:
     adds_layers: [tools]
     adds_models: []
   3:
-    name: CPU serving and MinIO KV cache
-    status: not_built
-    scope: >-
-      llama.cpp serving a quantized model on the EC2 instance's own CPUs — no
-      GPU pod required — alongside MinIO AIStor for datasets and model weights,
-      and LMCache writing the transformer KV cache to MinIO S3. Runs entirely
-      on existing EC2 infrastructure; no external service needed.
-    adds_layers: [cpu, storage, kvcache]
-    adds_models: [qwen-0.5b]
-  4:
     name: GPU serving on RunPod
-    status: not_built
+    status: running
     scope: >-
-      vLLM on a RunPod GPU pod behind the same gateway, so self-hosted GPU and
-      CPU models sit side by side in one Langfuse project alongside the
-      commercial APIs.
+      vLLM on a RunPod GPU pod behind the same gateway. Language routing
+      directs Korean to claude-sonnet and English/CJK to qwen-7b. GPU runtime
+      cost is tracked via RUNPOD_COST_PER_TOKEN and traces carry the
+      provider:runpod tag.
     adds_layers: [serving]
     adds_models: [qwen-7b]
-  5:
+  4:
     name: Operating recipes
     status: not_built
     scope: >-
       No new layers. Context-based routing in LiteLLM, LibreChat Agents over
       the Phase 2 MCP tools, Langfuse evaluations, gateway guardrails, and
       finally judge-scored routing — aggregate judge scores feeding back into
-      where requests go. That loop is the destination Phases 1-4 exist to make
+      where requests go. That loop is the destination Phases 1-3 exist to make
       possible: it needs one point that both measures a request and decides
       its route.
     adds_layers: []
@@ -103,7 +94,7 @@ defaults:
 #            models whose `enabled: true`.
 #
 #  The phase-N profiles are cumulative: phase-3 includes everything phase-1 and
-#  phase-2 brought up.
+#  phase-2 brought up. phase-4 shares the same layers as phase-3.
 # ─────────────────────────────────────────────────────────────────────────────
 profiles:
 
@@ -119,43 +110,29 @@ profiles:
     layers: [gateway, observability, ui, tools]
     models: [claude-sonnet]
 
-  # ── Phase 3 — CPU serving + MinIO KV cache. Runs on existing EC2. ──
+  # ── Phase 3 — GPU serving on RunPod alongside Phase 2 layers. ──
+  #    `serving` (RunPod) requires VLLM_API_BASE; the resolver skips it if unset.
   phase-3:
-    description: "Phase 3 — Phase 2 plus CPU serving and MinIO KV cache"
-    layers: [gateway, observability, ui, tools, cpu, storage, kvcache]
+    description: "Phase 3 — Phase 2 plus GPU serving on RunPod"
+    layers: [gateway, observability, ui, tools, serving]
 
-  # ── Phase 4 — add GPU serving (RunPod) alongside the CPU path. ──
-  #    Cumulative over Phase 3. `serving` (RunPod) requires VLLM_API_BASE;
-  #    the resolver skips it if unset, so Phase 3 layers continue to work.
-  phase-4:
-    description: "Phase 4 — Phase 3 plus GPU serving on RunPod"
-    layers: [gateway, observability, ui, tools, cpu, storage, kvcache, serving]
-
-  # ── Phase 5 — operating recipes. Same layers as Phase 4 by design: these
+  # ── Phase 4 — operating recipes. Same layers as Phase 3 by design: these
   #    are things to *do* with the stack, not things to add to it. ──
-  phase-5:
-    description: "Phase 5 — Phase 4 plus operating recipes (no new layers)"
-    layers: [gateway, observability, ui, tools, cpu, storage, kvcache, serving]
+  phase-4:
+    description: "Phase 4 — Phase 3 plus operating recipes (no new layers)"
+    layers: [gateway, observability, ui, tools, serving]
 
   # ── Convenience aliases, independent of phase ──
 
   # Everything currently implemented, whatever phase that is.
   full:
     description: Every layer whose `enabled` is true
-    layers: [gateway, observability, ui, tools, cpu, storage, kvcache, serving]
+    layers: [gateway, observability, ui, tools, serving]
 
   # Gateway + traces, no chat UI. For SDK / script-driven demos.
   headless:
     description: Gateway and observability only, no UI
     layers: [gateway, observability]
-
-  # Nothing leaves the network boundary. Requires Phase 3 (CPU).
-  # CPU serving (llama.cpp on EC2) is more truly airgapped than RunPod, which
-  # requires an outbound connection to the RunPod API.
-  airgapped:
-    description: Self-hosted models only — no egress to commercial APIs
-    layers: [gateway, observability, ui, cpu]
-    models: [qwen-0.5b]
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Deployment targets — selected with `--target`, never hard-coded in configs.
@@ -166,9 +143,8 @@ targets:
     kind: compose
     description: >-
       Phase 1 development target — local Docker Compose. Phase 2 and above
-      require the aws-ec2 target: CPU inference is impractically slow on a
-      laptop, and RunPod (Phase 4) is already an external service. Use
-      `docker` to iterate on Phase 1; use `aws-ec2` for everything else.
+      require the aws-ec2 target. RunPod (Phase 3) is an external service.
+      Use `docker` to iterate on Phase 1; use `aws-ec2` for everything else.
     compose_file: docker/docker-compose.yml
     env_file: .env
     host: localhost
@@ -182,18 +158,11 @@ targets:
       different `--target` flag.
     dir: terraform
     host: null                  # resolved from the `public_ip` terraform output
-    # Same five phases as `docker`. Phase 3's CPU serving runs on this instance,
-    # so its KV cache uses the local MinIO S3 bucket natively. Phase 4's GPU KV
-    # cache stays pod-local (RunPod cannot reach this host without latency
-    # defeating the purpose). See layers.kvcache.
-    supported_phases: [1, 2, 3, 4, 5]
+    supported_phases: [1, 2, 3, 4]
     notes:
       3: >-
-        CPU serving (llama.cpp) runs on the EC2 instance. KV-cache offload uses
-        the instance's own MinIO bucket — no external connection required.
-      4: >-
         Requires VLLM_API_BASE pointing at a live RunPod pod. GPU KV cache stays
-        pod-local — do not route it to this instance's MinIO over the internet.
+        pod-local on the RunPod worker.
     vars:
       instance_type: t3.xlarge
       volume_size_gb: 100
@@ -308,8 +277,7 @@ layers:
       trace_sample_rate: 1.0
       # Langfuse v3 needs all four of these. They are internal dependencies of
       # this layer and come up with it on the `obs` compose profile — they are
-      # NOT the Phase 4 `storage` layer, which is a separate, user-facing
-      # artifact store that happens to also be MinIO.
+      # NOT a separate artifact store.
       backends:
         clickhouse:
           managed_by: clickhouse-cloud
@@ -351,10 +319,10 @@ layers:
         - auto
 
   serving:
-    phase: 4
+    phase: 3
     # Nothing to scaffold in this repo — the endpoint is provisioned in the
     # RunPod console (Serverless → New Endpoint → vLLM worker template), so
-    # this stays `true` and `--profile phase-4` works as soon as VLLM_API_BASE
+    # this stays `true` and `--profile phase-3` works as soon as VLLM_API_BASE
     # points at a live serverless endpoint.
     enabled: true
     impl: vllm
@@ -375,15 +343,13 @@ layers:
         - yanolja/EEVE-Korean-Instruct-10.8B-v1.0
 
   # ── Phase 2 — MCP tool layer ──
-  #
-  # Uses ClickHouse Cloud's built-in MCP endpoint directly — no local proxy
-  # container required.  LiteLLM connects over HTTPS to port 8443 using
-  # ClickHouse Cloud credentials assembled at container-start time.
   tools:
     phase: 2
     enabled: true
     impl: mcp
-    managed_by: external
+    managed_by: compose
+    compose_profile: tools
+    port: 9100
     requires: [gateway]
     options:
       # ClickHouse Cloud: agents can query the warehouse and every tool call
@@ -391,97 +357,11 @@ layers:
       servers:
         - name: clickhouse
           enabled: true
-          transport: http
-          url_env: CLICKHOUSE_MCP_URL
+          transport: sse
+          url_env: MCP_CLICKHOUSE_URL
           credentials_env: [CLICKHOUSE_CLOUD_HOST, CLICKHOUSE_CLOUD_USER, CLICKHOUSE_CLOUD_PASSWORD]
           scopes: [read_only]
 
-  # ── Phase 4 — user-facing artifact store (distinct from Langfuse's blob
-  #    store above: datasets, eval artifacts, model weights).
-  #
-  #    Licensing: MinIO AIStor Free is single-node with no artificial capacity
-  #    limit, and includes erasure coding and bitrot protection — so this whole
-  #    layer costs nothing at the scale this stack runs at. The threshold is
-  #    node count, not terabytes: going multi-node moves you to Enterprise Lite
-  #    (under 400 TiB) or Enterprise. Single node is the right scope for a
-  #    reference architecture that is explicitly not a production data
-  #    platform. ──
-  storage:
-    phase: 3
-    enabled: false
-    impl: minio-aistor
-    managed_by: compose
-    compose_profile: storage
-    port: 9011                  # console; API on 9012 — avoids the Langfuse
-    requires: []                # MinIO on 9001/9002
-    options:
-      api_port: 9012
-      # `kvcache` is here because this one instance serves two roles: the
-      # user-facing artifact store, and the S3 backend for `kvcache` below when
-      # vLLM runs locally. One container, two jobs.
-      buckets: [datasets, artifacts, weights, kvcache]
-
-  # ── Phase 3 — KV-cache reuse via LMCache. ──
-  #
-  #  Not a container. LMCache runs in-process with the inference engine, so
-  #  this layer's lifecycle follows whichever serving layer is active.
-  #
-  #  Backend is decided per serving path:
-  #
-  #    Phase 3 — CPU serving (llama.cpp, local compose) → s3
-  #      The `storage` layer's MinIO S3 bucket (`kvcache`). Local, so no
-  #      network penalty. This is the primary KV-cache path for Phase 3.
-  #
-  #    Phase 4 — GPU serving (RunPod, remote) → pod-local
-  #      CPU RAM + NVMe on the GPU pod. Do NOT point a remote pod at the
-  #      EC2 instance's object store: 2-16 MB KV blocks over an internet hop
-  #      are slower than recomputing prefill. Blocks are also derived from
-  #      prompts — routing them through a tunnel contradicts sovereignty.
-  kvcache:
-    phase: 3
-    enabled: false
-    impl: lmcache
-    managed_by: follows-serving
-    compose_profile: null
-    requires: []                # follows whichever of `serving` or `cpu` is active
-    options:
-      # vLLM's built-in prefix caching is the first step and is useful alone,
-      # in GPU memory, with no backend at all.
-      prefix_caching: true
-      backend_by_serving:
-        runpod: pod-local       # Phase 3: GPU pod, KV blocks stay on pod
-        compose: s3             # Phase 4: CPU serving in compose, MinIO S3
-      s3_bucket: kvcache
-
-  # ── Phase 3 — CPU-based local inference via llama.cpp. ──
-  #
-  #  llama.cpp server runs as a compose service on the EC2 instance's own CPUs.
-  #  Exposes an OpenAI-compatible endpoint on port 8080 (Docker network only).
-  #  No GPU pod required — runs on the instance's 4 vCPUs and 16 GiB RAM.
-  #
-  #  Model: Qwen2.5-0.5B-Instruct (Q4_K_M GGUF, ~0.4 GiB). Small enough to
-  #  leave headroom for the rest of the stack. Larger models (1.5B, 3B) work
-  #  if the instance type is upgraded.
-  #
-  #  KV-cache offload: LMCache running in-process with llama.cpp writes
-  #  transformer KV blocks to the `storage` layer's MinIO S3 `kvcache` bucket.
-  #  This is the `compose: s3` path in kvcache.options.backend_by_serving.
-  cpu:
-    phase: 3
-    enabled: false
-    impl: llama-cpp
-    managed_by: compose
-    compose_profile: cpu
-    port: 8080
-    requires: [gateway, storage]
-    options:
-      model: Qwen/Qwen2.5-0.5B-Instruct
-      quantization: Q4_K_M
-      context_window: 32768
-      n_threads: 4              # t3.xlarge has 4 vCPUs
-      n_gpu_layers: 0           # CPU only — no GPU offload
-      kvcache_backend: s3       # LMCache → MinIO (storage layer, kvcache bucket)
-      s3_bucket: kvcache
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -498,7 +378,7 @@ layers:
 models:
 
   - alias: qwen-7b
-    phase: 4
+    phase: 3
     enabled: true
     tier: self_hosted
     provider: vllm
@@ -513,19 +393,6 @@ models:
       label: Qwen2.5 7B — GPU
       description: Runs on a RunPod GPU pod. No data leaves the boundary.
 
-  - alias: qwen-0.5b
-    phase: 3
-    enabled: true
-    tier: self_hosted
-    provider: llama-cpp
-    litellm_model: openai/Qwen/Qwen2.5-0.5B-Instruct
-    api_base_env: LLAMA_CPP_API_BASE
-    context_window: 32768
-    cost_per_1k: { input: 0.0, output: 0.0 }
-    rate_limit: { rpm: 30, tpm: 100000 }
-    ui:
-      label: Qwen2.5 0.5B — CPU
-      description: Runs on EC2 CPU. No GPU required, no data leaves the boundary.
 
   - alias: gpt-4o
     phase: 1
@@ -627,13 +494,10 @@ secrets:
       - DOMAIN_BASE
       - DOMAIN_SSL_EMAIL
     2:
-      - CLICKHOUSE_CLOUD_HOST
+      - MCP_CLICKHOUSE_URL
       - CLICKHOUSE_CLOUD_USER
       - CLICKHOUSE_CLOUD_PASSWORD
     3:
-      - ARTIFACT_MINIO_ROOT_USER
-      - ARTIFACT_MINIO_ROOT_PASSWORD
-    4:
       - VLLM_API_BASE
       - VLLM_API_KEY
       - RUNPOD_COST_PER_TOKEN
@@ -676,6 +540,3 @@ health:
     - name: vllm
       layer: serving
       url: "{{VLLM_API_BASE}}/models"
-    - name: artifact-minio
-      layer: storage
-      url: http://{{host}}:9012/minio/health/live
