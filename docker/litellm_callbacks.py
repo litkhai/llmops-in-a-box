@@ -610,6 +610,35 @@ class UnifiedRouter(litellm.CustomLogger):
         if call_type not in ("completion", "acompletion"):
             return data
 
+        # ── 0. MCP tool injection ─────────────────────────────────────────────
+        # Must run before the _ROUTABLE_ALIASES early-return so that explicitly
+        # named models (e.g. "claude-sonnet") also receive ClickHouse tools.
+        # Skipped for follow-up completions that run after tool execution.
+        if (
+            _MCP_ENABLED
+            and not data.get("tools")
+            and not (data.get("metadata") or {}).get("is_tool_followup")
+        ):
+            mcp_tools = await _get_mcp_tools()
+            if mcp_tools:
+                data["tools"] = mcp_tools
+                data["tool_choice"] = "auto"
+                data.setdefault("metadata", {})["mcp_tools_injected"] = True
+                # Prepend a system message so the model knows to use tools for data questions.
+                messages = data.get("messages") or []
+                if not any(m.get("role") == "system" for m in messages):
+                    data["messages"] = [{"role": "system", "content": (
+                        "You have access to ClickHouse database tools. "
+                        "When the user asks about databases, tables, data, or queries, "
+                        "call the available tools to retrieve the information rather than "
+                        "saying you cannot access the data."
+                    )}] + messages
+                print(f"[mcp_inject] injected {len(mcp_tools)} tools into model={data.get('model','?')} call_type={call_type}", flush=True)
+            else:
+                print(f"[mcp_inject] _get_mcp_tools() returned empty list", flush=True)
+        elif _MCP_ENABLED:
+            print(f"[mcp_inject] skip: tools={bool(data.get('tools'))} is_followup={(data.get('metadata') or {}).get('is_tool_followup')}", flush=True)
+
         requested = data.get("model", "")
         if requested not in _ROUTABLE_ALIASES:
             return data
@@ -626,21 +655,6 @@ class UnifiedRouter(litellm.CustomLogger):
         data.setdefault("metadata", {})
         trace_id = data["metadata"].get("trace_id") or call_id
         data["metadata"]["trace_id"] = trace_id
-
-        # ── 0. MCP tool injection ─────────────────────────────────────────────
-        # Inject ClickHouse MCP tools so the model can query the data warehouse
-        # without the client managing tools explicitly.  Skipped for follow-up
-        # completions that run after tool execution (avoids infinite loops).
-        if (
-            _MCP_ENABLED
-            and not data.get("tools")
-            and not (data.get("metadata") or {}).get("is_tool_followup")
-        ):
-            mcp_tools = await _get_mcp_tools()
-            if mcp_tools:
-                data["tools"] = mcp_tools
-                data["tool_choice"] = "auto"
-                data.setdefault("metadata", {})["mcp_tools_injected"] = True
 
         # ── 1. Tool-use routing — skip language routing for agentic requests ──
         # Route tool-use requests to claude-sonnet regardless of language; it
@@ -718,12 +732,14 @@ class UnifiedRouter(litellm.CustomLogger):
         # completion that synthesises a final plain-text response.
         meta = data.get("metadata") or {}
         choice = response.choices[0] if getattr(response, "choices", None) else None
+        finish_reason = getattr(choice, "finish_reason", None) if choice else None
+        print(f"[mcp_loop] mcp_enabled={_MCP_ENABLED} injected={meta.get('mcp_tools_injected')} followup={meta.get('is_tool_followup')} finish={finish_reason}", flush=True)
         if (
             _MCP_ENABLED
             and meta.get("mcp_tools_injected")
             and not meta.get("is_tool_followup")
             and choice
-            and getattr(choice, "finish_reason", None) == "tool_calls"
+            and finish_reason == "tool_calls"
             and getattr(choice.message, "tool_calls", None)
         ):
             tool_msgs = []
