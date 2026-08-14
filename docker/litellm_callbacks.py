@@ -58,6 +58,70 @@ _REVIEW_THRESHOLD  = 0.5   # helpfulness below this → flagged for review
 _LANGFUSE_HOST     = os.environ.get("LANGFUSE_HOST", "http://langfuse-web:3000")
 _annotation_queue_id: Optional[str] = None
 
+# ── MCP tool injection ────────────────────────────────────────────────────────
+# When the tools layer is active (MCP_CLICKHOUSE_URL set), MCP tools are
+# injected into every chat request automatically.  The model decides whether to
+# call them; if it does, the post-call hook executes the tool and runs a follow-
+# up completion so the client always receives a plain text response.
+_MCP_ENABLED = bool(os.environ.get("MCP_CLICKHOUSE_URL"))
+_LITELLM_INTERNAL_URL = "http://localhost:4000"
+_mcp_tools_cache: Optional[list] = None
+
+
+async def _get_mcp_tools() -> list:
+    """Fetch MCP tool definitions from LiteLLM REST endpoint; cache on first call."""
+    global _mcp_tools_cache
+    if _mcp_tools_cache is not None:
+        return _mcp_tools_cache
+    master_key = os.environ.get("LITELLM_MASTER_KEY", "")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{_LITELLM_INTERNAL_URL}/mcp-rest/tools/list",
+                headers={"Authorization": f"Bearer {master_key}"},
+                timeout=5.0,
+            )
+            if r.status_code == 200:
+                raw = r.json().get("tools", [])
+                _mcp_tools_cache = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t["name"],
+                            "description": t.get("description", ""),
+                            "parameters": t.get("inputSchema", {"type": "object", "properties": {}}),
+                        },
+                    }
+                    for t in raw
+                ]
+            else:
+                _mcp_tools_cache = []
+    except Exception:
+        _mcp_tools_cache = []
+    return _mcp_tools_cache
+
+
+async def _call_mcp_tool(name: str, arguments: dict) -> str:
+    """Execute a single MCP tool via the LiteLLM REST endpoint."""
+    master_key = os.environ.get("LITELLM_MASTER_KEY", "")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"{_LITELLM_INTERNAL_URL}/mcp-rest/tools/call",
+                headers={"Authorization": f"Bearer {master_key}"},
+                json={"name": name, "arguments": arguments},
+                timeout=30.0,
+            )
+            r.raise_for_status()
+            body = r.json()
+            content = (body.get("result") or {}).get("content") or []
+            if isinstance(content, list):
+                return "\n".join(c.get("text", str(c)) for c in content if c)
+            return json.dumps(body)
+    except Exception as exc:
+        return f"Tool error: {exc}"
+
+
 # ── model costs (must match litellm_config.yaml model_info) ──────────────────
 # Used to pass explicit cost to Langfuse so the cost dashboard populates
 # regardless of whether Langfuse's model registry recognises the model name.
@@ -532,11 +596,26 @@ class UnifiedRouter(litellm.CustomLogger):
         trace_id = data["metadata"].get("trace_id") or call_id
         data["metadata"]["trace_id"] = trace_id
 
+        # ── 0. MCP tool injection ─────────────────────────────────────────────
+        # Inject ClickHouse MCP tools so the model can query the data warehouse
+        # without the client managing tools explicitly.  Skipped for follow-up
+        # completions that run after tool execution (avoids infinite loops).
+        if (
+            _MCP_ENABLED
+            and not data.get("tools")
+            and not (data.get("metadata") or {}).get("is_tool_followup")
+        ):
+            mcp_tools = await _get_mcp_tools()
+            if mcp_tools:
+                data["tools"] = mcp_tools
+                data["tool_choice"] = "auto"
+                data.setdefault("metadata", {})["mcp_tools_injected"] = True
+
         # ── 1. Tool-use routing — skip language routing for agentic requests ──
-        # qwen-7b is a small model with poor function-calling reliability.
-        # Any request that carries tools goes straight to the capable model.
+        # Route tool-use requests to claude-sonnet regardless of language; it
+        # has the most reliable function-calling across all tool types.
         if data.get("tools"):
-            data["model"] = _ENGLISH_MODEL
+            data["model"] = _MULTILINGUAL_MODEL
             data["metadata"]["detected_script"] = "tool-use"
             data["metadata"]["routed_model"]    = _ENGLISH_MODEL
             data["metadata"]["trace_name"]      = "chat/tool-use"
@@ -592,16 +671,67 @@ class UnifiedRouter(litellm.CustomLogger):
     async def async_post_call_success_hook(self, data, user_api_key_dict, response):
         call_id = str(data.get("litellm_call_id") or id(data))
 
-        if call_id not in _image_tasks:
+        # ── image replacement ─────────────────────────────────────────────────
+        if call_id in _image_tasks:
+            task = _image_tasks.pop(call_id)
+            img_markdown = await task
+            try:
+                response.choices[0].message.content = img_markdown
+            except (AttributeError, IndexError, TypeError):
+                pass
             return response
 
-        task = _image_tasks.pop(call_id)
-        img_markdown = await task
+        # ── MCP agentic loop ──────────────────────────────────────────────────
+        # If the model returned tool_calls (because we injected MCP tools),
+        # execute each tool against mcp-clickhouse and run one follow-up
+        # completion that synthesises a final plain-text response.
+        meta = data.get("metadata") or {}
+        choice = response.choices[0] if getattr(response, "choices", None) else None
+        if (
+            _MCP_ENABLED
+            and meta.get("mcp_tools_injected")
+            and not meta.get("is_tool_followup")
+            and choice
+            and getattr(choice, "finish_reason", None) == "tool_calls"
+            and getattr(choice.message, "tool_calls", None)
+        ):
+            tool_msgs = []
+            for tc in choice.message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                result = await _call_mcp_tool(tc.function.name, args)
+                tool_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": result,
+                })
 
-        try:
-            response.choices[0].message.content = img_markdown
-        except (AttributeError, IndexError, TypeError):
-            pass
+            assistant_msg = {
+                "role": "assistant",
+                "content": choice.message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in choice.message.tool_calls
+                ],
+            }
+            messages = list(data.get("messages", [])) + [assistant_msg] + tool_msgs
+
+            final = await litellm.acompletion(
+                model=data.get("model", _MULTILINGUAL_MODEL),
+                messages=messages,
+                metadata={"is_tool_followup": True},
+            )
+            return final
 
         return response
 
