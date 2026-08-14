@@ -66,11 +66,12 @@ _annotation_queue_id: Optional[str] = None
 _MCP_ENABLED = bool(os.environ.get("MCP_CLICKHOUSE_URL"))
 _LITELLM_INTERNAL_URL = "http://localhost:4000"
 _mcp_tools_cache: Optional[list] = None
+_mcp_tool_server_map: dict = {}   # tool_name → server_id for /mcp-rest/tools/call
 
 
 async def _get_mcp_tools() -> list:
     """Fetch MCP tool definitions from LiteLLM REST endpoint; cache on first call."""
-    global _mcp_tools_cache
+    global _mcp_tools_cache, _mcp_tool_server_map
     if _mcp_tools_cache is not None:
         return _mcp_tools_cache
     master_key = os.environ.get("LITELLM_MASTER_KEY", "")
@@ -83,41 +84,51 @@ async def _get_mcp_tools() -> list:
             )
             if r.status_code == 200:
                 raw = r.json().get("tools", [])
-                _mcp_tools_cache = [
-                    {
+                _mcp_tools_cache = []
+                for t in raw:
+                    _mcp_tools_cache.append({
                         "type": "function",
                         "function": {
                             "name": t["name"],
                             "description": t.get("description", ""),
                             "parameters": t.get("inputSchema", {"type": "object", "properties": {}}),
                         },
-                    }
-                    for t in raw
-                ]
+                    })
+                    # server_id is nested under mcp_info; required for /mcp-rest/tools/call
+                    server_id = (t.get("mcp_info") or {}).get("server_id") or ""
+                    if server_id:
+                        _mcp_tool_server_map[t["name"]] = server_id
             else:
                 _mcp_tools_cache = []
     except Exception:
         _mcp_tools_cache = []
+    print(f"[mcp_inject] tool server map: {_mcp_tool_server_map}", flush=True)
     return _mcp_tools_cache
 
 
 async def _call_mcp_tool(name: str, arguments: dict) -> str:
     """Execute a single MCP tool via the LiteLLM REST endpoint."""
     master_key = os.environ.get("LITELLM_MASTER_KEY", "")
+    server_id = _mcp_tool_server_map.get(name, "")
+    body = {"name": name, "arguments": arguments}
+    if server_id:
+        body["server_id"] = server_id
+    print(f"[mcp_call] tool={name} server_id={server_id!r} args={arguments}", flush=True)
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{_LITELLM_INTERNAL_URL}/mcp-rest/tools/call",
                 headers={"Authorization": f"Bearer {master_key}"},
-                json={"name": name, "arguments": arguments},
+                json=body,
                 timeout=30.0,
             )
+            print(f"[mcp_call] status={r.status_code} body={r.text[:200]}", flush=True)
             r.raise_for_status()
-            body = r.json()
-            content = (body.get("result") or {}).get("content") or []
+            resp_body = r.json()
+            content = (resp_body.get("result") or {}).get("content") or []
             if isinstance(content, list):
                 return "\n".join(c.get("text", str(c)) for c in content if c)
-            return json.dumps(body)
+            return json.dumps(resp_body)
     except Exception as exc:
         return f"Tool error: {exc}"
 
