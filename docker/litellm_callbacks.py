@@ -122,12 +122,15 @@ async def _call_mcp_tool(name: str, arguments: dict) -> str:
                 json=body,
                 timeout=30.0,
             )
-            print(f"[mcp_call] status={r.status_code} body={r.text[:200]}", flush=True)
+            print(f"[mcp_call] status={r.status_code} body={r.text[:300]}", flush=True)
             r.raise_for_status()
             resp_body = r.json()
-            content = (resp_body.get("result") or {}).get("content") or []
+            # LiteLLM returns content at the top level: {"content": [...], "_meta": ...}
+            content = resp_body.get("content") or (resp_body.get("result") or {}).get("content") or []
             if isinstance(content, list):
-                return "\n".join(c.get("text", str(c)) for c in content if c)
+                text = "\n".join(c.get("text", str(c)) for c in content if c)
+                print(f"[mcp_call] result_text={text[:200]}", flush=True)
+                return text
             return json.dumps(resp_body)
     except Exception as exc:
         return f"Tool error: {exc}"
