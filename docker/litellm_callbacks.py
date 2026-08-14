@@ -122,6 +122,37 @@ async def _call_mcp_tool(name: str, arguments: dict) -> str:
         return f"Tool error: {exc}"
 
 
+async def _followup_completion(model: str, messages: list) -> Optional[str]:
+    """Run a follow-up chat completion via the LiteLLM HTTP proxy.
+
+    Using the HTTP endpoint (not litellm.acompletion directly) so that the
+    model alias (e.g. "claude-sonnet") is resolved through the proxy's model
+    catalog, which knows the actual provider model string.
+    The is_tool_followup flag in metadata prevents recursive tool injection.
+    """
+    master_key = os.environ.get("LITELLM_MASTER_KEY", "")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"{_LITELLM_INTERNAL_URL}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {master_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "metadata": {"is_tool_followup": True},
+                    "stream": False,
+                },
+                timeout=60.0,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+    except Exception:
+        return None
+
+
 # ── model costs (must match litellm_config.yaml model_info) ──────────────────
 # Used to pass explicit cost to Langfuse so the cost dashboard populates
 # regardless of whether Langfuse's model registry recognises the model name.
@@ -726,12 +757,14 @@ class UnifiedRouter(litellm.CustomLogger):
             }
             messages = list(data.get("messages", [])) + [assistant_msg] + tool_msgs
 
-            final = await litellm.acompletion(
-                model=data.get("model", _MULTILINGUAL_MODEL),
+            final_content = await _followup_completion(
+                model=data.get("model", "auto"),
                 messages=messages,
-                metadata={"is_tool_followup": True},
             )
-            return final
+            if final_content:
+                response.choices[0].message.content = final_content
+                response.choices[0].message.tool_calls = None
+                response.choices[0].finish_reason = "stop"
 
         return response
 
@@ -869,7 +902,10 @@ class UnifiedRouter(litellm.CustomLogger):
         asyncio.ensure_future(_judge_response(trace_id, messages, output))
         asyncio.ensure_future(_register_for_feedback(trace_id, output))
 
-    async def async_post_call_failure_hook(self, data, user_api_key_dict, original_exception, **kwargs):
+    async def async_post_call_failure_hook(self, *args, **kwargs):
+        # Signature changed across LiteLLM versions; accept both positional and keyword.
+        data = kwargs.get("data") or kwargs.get("request_data") or (args[0] if args else {})
+        original_exception = kwargs.get("original_exception") or (args[1] if len(args) > 1 else None)
         # Clean up the image task on LLM failure so the dict does not leak.
         call_id = str(data.get("litellm_call_id") or id(data))
         task = _image_tasks.pop(call_id, None)
