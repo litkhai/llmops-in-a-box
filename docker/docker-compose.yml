@@ -315,6 +315,10 @@ services:
       RUNPOD_COST_PER_TOKEN: ${RUNPOD_COST_PER_TOKEN:-0}
 
 
+      # MCP tool layer (Phase 2). Set by stack.sh when tools profile is active.
+      # Presence of this var enables automatic ClickHouse tool injection in callbacks.
+      MCP_CLICKHOUSE_URL: ${MCP_CLICKHOUSE_URL:-}
+
       # Image generation — Cloudflare Workers AI (optional; leave blank to disable).
       CF_API_TOKEN: ${CF_API_TOKEN:-}
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
