@@ -645,7 +645,12 @@ class UnifiedRouter(litellm.CustomLogger):
                         "You have access to ClickHouse database tools. "
                         "When the user asks about databases, tables, data, or queries, "
                         "call the available tools to retrieve the information rather than "
-                        "saying you cannot access the data."
+                        "saying you cannot access the data. "
+                        "Follow this workflow: first call list_databases to discover available "
+                        "databases, then call list_tables with the correct database name to see "
+                        "the schema, then call run_query with fully-qualified table names "
+                        "(e.g. database.table). Never guess table names — always verify with "
+                        "list_tables first."
                     )}] + messages
                 print(f"[mcp_inject] injected {len(mcp_tools)} tools into model={data.get('model','?')} call_type={call_type}", flush=True)
             else:
