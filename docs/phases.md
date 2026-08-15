@@ -125,8 +125,10 @@ automatically.
 
 The gateway injects the tools and runs the agentic loop itself (up to five
 hops), so a client that knows nothing about MCP still gets a plain text answer
-built from tool results. All tool calls are traced through LiteLLM → Langfuse
-alongside the model calls that triggered them.
+built from tool results. Each tool execution is traced as a `tool-result/<name>`
+span and each follow-up model call as a `<model>/tool-hop-N` generation, so the
+warehouse access and the loop's token spend both sit in the same trace as the
+request that caused them.
 
 !!! note "Tools are injected for Korean-language requests only"
     Language routing sends Korean to `claude-sonnet` and English/CJK to

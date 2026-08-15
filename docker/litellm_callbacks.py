@@ -25,6 +25,14 @@ Two routing decisions are made here before the request reaches a provider:
      qwen-7b → claude-sonnet  (when the self-hosted pod is cold or down)
      auto    → claude-sonnet  (if language-routed target fails)
 
+3. MCP TOOL INJECTION — for Hangul requests the ClickHouse tools are injected
+   and the tool loop runs here, at the gateway, so a client that knows nothing
+   about MCP still receives plain prose. Everything the loop does is traced:
+     - each tool execution   → `tool-result/<name>` span (arguments, result, latency)
+     - each follow-up model call → `<model>/tool-hop-N` generation (tokens, cost)
+   The loop never hands unexecuted tool_calls back to the client — a client with
+   no MCP configuration cannot run them, and would report the tool as missing.
+
 Script detection is a pure Unicode heuristic — no extra network call, < 1 ms
 added to p99 latency.
 """
@@ -35,6 +43,7 @@ import hashlib
 import hmac
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -67,6 +76,15 @@ _MCP_ENABLED = bool(os.environ.get("MCP_CLICKHOUSE_URL"))
 _LITELLM_INTERNAL_URL = "http://localhost:4000"
 _mcp_tools_cache: Optional[list] = None
 _mcp_tool_server_map: dict = {}   # tool_name → server_id for /mcp-rest/tools/call
+
+# Shown to the user when the loop cannot produce prose — max hops exhausted, or a
+# follow-up call failed. Anything is better than passing the tool_calls through:
+# the client has no MCP configuration and reports the tool as not found.
+# Korean because injection is Hangul-gated; see async_pre_call_hook step 0.
+_MCP_FALLBACK_MESSAGE = (
+    "데이터를 조회했지만 답변으로 정리하지 못했습니다. "
+    "질문 범위를 좁혀서 다시 시도해 주세요."
+)
 
 
 async def _get_mcp_tools() -> list:
@@ -106,14 +124,21 @@ async def _get_mcp_tools() -> list:
     return _mcp_tools_cache
 
 
-async def _call_mcp_tool(name: str, arguments: dict) -> str:
-    """Execute a single MCP tool via the LiteLLM REST endpoint."""
+async def _call_mcp_tool(name: str, arguments: dict, trace_id: Optional[str] = None) -> str:
+    """Execute a single MCP tool via the LiteLLM REST endpoint.
+
+    Emits a `tool-result/<name>` Langfuse span under trace_id when one is given,
+    so the ClickHouse round trip is visible beside the model call that caused it.
+    Without it the gateway-side loop leaves no trace of having touched the
+    warehouse at all.
+    """
     master_key = os.environ.get("LITELLM_MASTER_KEY", "")
     server_id = _mcp_tool_server_map.get(name, "")
     body = {"name": name, "arguments": arguments}
     if server_id:
         body["server_id"] = server_id
     print(f"[mcp_call] tool={name} server_id={server_id!r} args={arguments}", flush=True)
+    started = time.monotonic()
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(
@@ -130,10 +155,14 @@ async def _call_mcp_tool(name: str, arguments: dict) -> str:
             if isinstance(content, list):
                 text = "\n".join(c.get("text", str(c)) for c in content if c)
                 print(f"[mcp_call] result_text={text[:200]}", flush=True)
-                return text
-            return json.dumps(resp_body)
+            else:
+                text = json.dumps(resp_body)
+            _tool_span(trace_id, name, server_id, arguments, text, started)
+            return text
     except Exception as exc:
-        return f"Tool error: {exc}"
+        message = f"Tool error: {exc}"
+        _tool_span(trace_id, name, server_id, arguments, message, started, error=True)
+        return message
 
 
 async def _call_model_once(model: str, messages: list) -> Optional[dict]:
@@ -159,16 +188,28 @@ async def _call_model_once(model: str, messages: list) -> Optional[dict]:
         return None
 
 
-async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5) -> Optional[str]:
+async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5,
+                            trace_id: Optional[str] = None) -> Optional[str]:
     """Multi-hop MCP agentic loop.
 
     Calls the model, executes any tool_calls, appends results, and repeats
     until the model returns finish_reason=stop or max_hops is reached.
+
+    Every hop is logged to Langfuse as a `<model>/tool-hop-N` generation under
+    trace_id. Without that the loop's token spend is invisible: follow-up calls
+    name an explicit model, so async_pre_call_hook returns before it can set
+    `routed_model`, and async_log_success_event then skips them.
+
+    Returns the assistant's final prose, or None if none could be produced.
+    Callers must not fall back to returning the model's raw tool_calls.
     """
+    last_content: Optional[str] = None
+
     for hop in range(max_hops):
+        started = datetime.now(timezone.utc)
         resp = await _call_model_once(model, messages)
         if not resp:
-            return None
+            return last_content
         choice = resp.get("choices", [{}])[0]
         finish_reason = choice.get("finish_reason")
         msg = choice.get("message", {})
@@ -177,8 +218,22 @@ async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5) -> Op
 
         print(f"[mcp_loop] hop={hop} finish={finish_reason} tools={bool(tool_calls)}", flush=True)
 
+        # Tail of the conversation only — the parent generation already carries the
+        # full prompt, and tool results are large enough to bloat every hop.
+        _generation(
+            trace_id, f"{model}/tool-hop-{hop}", model,
+            messages[-3:],
+            content or {"tool_calls": [
+                (tc.get("function") or {}).get("name") for tc in (tool_calls or [])
+            ]},
+            _usage_payload(resp.get("usage") or {}, model),
+            started, datetime.now(timezone.utc),
+        )
+
+        if content:
+            last_content = content
         if finish_reason == "stop" or not tool_calls:
-            return content
+            return content or last_content
 
         # Execute all tool calls this hop
         tool_msgs = []
@@ -187,7 +242,7 @@ async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5) -> Op
                 args = json.loads(tc["function"]["arguments"] or "{}")
             except Exception:
                 args = {}
-            result = await _call_mcp_tool(tc["function"]["name"], args)
+            result = await _call_mcp_tool(tc["function"]["name"], args, trace_id=trace_id)
             tool_msgs.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -197,12 +252,32 @@ async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5) -> Op
 
         messages = messages + [{"role": "assistant", "content": content, "tool_calls": tool_calls}] + tool_msgs
 
-    return None  # max hops reached
+    # Max hops reached. A capable model will keep finding one more query worth
+    # running, so ask once for a summary of what it already has rather than
+    # abandoning the request with the data unreported.
+    print(f"[mcp_loop] max_hops={max_hops} reached — asking for a final answer", flush=True)
+    started = datetime.now(timezone.utc)
+    nudge = messages + [{"role": "user", "content": (
+        "Answer now using only the tool results already gathered. "
+        "Do not call any more tools. Reply in the same language as the question."
+    )}]
+    resp = await _call_model_once(model, nudge)
+    if resp:
+        content = ((resp.get("choices") or [{}])[0].get("message") or {}).get("content")
+        _generation(
+            trace_id, f"{model}/tool-hop-final", model, nudge[-2:], content,
+            _usage_payload(resp.get("usage") or {}, model),
+            started, datetime.now(timezone.utc),
+        )
+        if content:
+            return content
+    return last_content
 
 
-async def _followup_completion(model: str, messages: list) -> Optional[str]:
+async def _followup_completion(model: str, messages: list,
+                               trace_id: Optional[str] = None) -> Optional[str]:
     """Compatibility shim — delegates to _run_agentic_loop."""
-    return await _run_agentic_loop(model, messages)
+    return await _run_agentic_loop(model, messages, trace_id=trace_id)
 
 
 # ── model costs (must match litellm_config.yaml model_info) ──────────────────
@@ -252,11 +327,12 @@ _IMAGE_RE = re.compile(
 # ── in-flight image tasks: call_id → asyncio.Task[str] ───────────────────────
 _image_tasks: Dict[str, "asyncio.Task[str]"] = {}
 
-# ── MCP-injected call tracking (call_id set) ──────────────────────────────────
+# ── MCP-injected call tracking (call_id → trace_id) ───────────────────────────
 # Metadata written in async_pre_call_hook is not guaranteed to propagate to
-# async_post_call_streaming_iterator_hook.  Use a global set keyed by call_id
-# (same pattern as _image_tasks) so the streaming hook can detect MCP calls.
-_mcp_injected_calls: set = set()
+# async_post_call_streaming_iterator_hook.  Use a global dict keyed by call_id
+# (same pattern as _image_tasks) so the streaming hook can both detect MCP calls
+# and recover the Langfuse trace_id to hang the loop's spans off.
+_mcp_injected_calls: Dict[str, str] = {}
 
 # ── language heuristic ────────────────────────────────────────────────────────
 _SCRIPT_THRESHOLD = 0.15
@@ -429,6 +505,59 @@ def _span(trace_id: str, name: str, input_: dict, output: dict) -> None:
         s.end()
     except Exception:
         pass  # never let observability code break the critical path
+
+
+def _tool_span(trace_id: Optional[str], name: str, server_id: str, arguments: dict,
+               result: str, started: float, error: bool = False) -> None:
+    """Record one MCP tool execution as a span under the parent trace.
+
+    Results are SQL result sets, so they are truncated — the span exists to show
+    that the call happened, with what arguments, and how long it took.
+    """
+    if not trace_id:
+        return
+    _span(
+        trace_id,
+        f"tool-result/{name}",
+        {"arguments": arguments, "server_id": server_id},
+        {
+            "error" if error else "result": str(result)[:2000],
+            "latency_s": round(time.monotonic() - started, 3),
+        },
+    )
+
+
+def _usage_payload(usage: dict, model: str) -> Optional[dict]:
+    """Convert an OpenAI-shaped usage dict into Langfuse usage with explicit cost."""
+    if not usage:
+        return None
+    inp = usage.get("prompt_tokens", 0) or 0
+    out = usage.get("completion_tokens", 0) or 0
+    in_rate, out_rate = _MODEL_COSTS.get(model, (0.0, 0.0))
+    return {
+        "input": inp,
+        "output": out,
+        "total": inp + out,
+        "input_cost": round(inp * in_rate, 8),
+        "output_cost": round(out * out_rate, 8),
+        "total_cost": round(inp * in_rate + out * out_rate, 8),
+    }
+
+
+def _generation(trace_id: Optional[str], name: str, model: str, input_, output,
+                usage: Optional[dict], start_time, end_time) -> None:
+    """Create a completed Langfuse generation nested under an existing trace."""
+    if not trace_id:
+        return
+    try:
+        g = _langfuse.generation(
+            trace_id=trace_id, name=name, model=model,
+            input=input_, output=output, usage=usage,
+            start_time=start_time, end_time=end_time,
+        )
+        g.end()
+    except Exception:
+        pass
 
 
 # ── rule-based scoring ────────────────────────────────────────────────────────
@@ -701,7 +830,10 @@ class UnifiedRouter(litellm.CustomLogger):
                 data["tools"] = mcp_tools
                 data["tool_choice"] = "auto"
                 data.setdefault("metadata", {})["mcp_tools_injected"] = True
-                _mcp_injected_calls.add(str(data.get("litellm_call_id") or id(data)))
+                # Provisional trace_id; overwritten below once the routing block
+                # has resolved the real one. They agree unless a client sent its own.
+                _mcp_call_id = str(data.get("litellm_call_id") or id(data))
+                _mcp_injected_calls[_mcp_call_id] = _mcp_call_id
                 # Prepend a system message so the model knows to use tools for data questions.
                 messages = data.get("messages") or []
                 if not any(m.get("role") == "system" for m in messages):
@@ -738,6 +870,10 @@ class UnifiedRouter(litellm.CustomLogger):
         data.setdefault("metadata", {})
         trace_id = data["metadata"].get("trace_id") or call_id
         data["metadata"]["trace_id"] = trace_id
+        # The post-call hooks read the trace_id from here, not from metadata, which
+        # does not reliably survive the trip to the streaming iterator hook.
+        if call_id in _mcp_injected_calls:
+            _mcp_injected_calls[call_id] = trace_id
 
         # ── 1. Tool-use routing — only for client-provided tools ─────────────
         # When tools are present but were NOT injected by us (e.g. LibreChat's
@@ -832,13 +968,18 @@ class UnifiedRouter(litellm.CustomLogger):
             and finish_reason == "tool_calls"
             and getattr(choice.message, "tool_calls", None)
         ):
+            trace_id = (
+                _mcp_injected_calls.pop(call_id, None)
+                or meta.get("trace_id")
+                or call_id
+            )
             tool_msgs = []
             for tc in choice.message.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except Exception:
                     args = {}
-                result = await _call_mcp_tool(tc.function.name, args)
+                result = await _call_mcp_tool(tc.function.name, args, trace_id=trace_id)
                 tool_msgs.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -866,11 +1007,17 @@ class UnifiedRouter(litellm.CustomLogger):
             final_content = await _followup_completion(
                 model=data.get("model", "auto"),
                 messages=messages,
+                trace_id=trace_id,
             )
-            if final_content:
-                response.choices[0].message.content = final_content
-                response.choices[0].message.tool_calls = None
-                response.choices[0].finish_reason = "stop"
+            if not final_content:
+                # Never return the tool_calls: the client has no MCP configuration
+                # and would report the tool as not found.
+                final_content = _MCP_FALLBACK_MESSAGE
+                _span(trace_id, "mcp-loop/incomplete", {"hops": "exhausted or failed"},
+                      {"reason": "no final text from the loop"})
+            response.choices[0].message.content = final_content
+            response.choices[0].message.tool_calls = None
+            response.choices[0].finish_reason = "stop"
 
         return response
 
@@ -909,11 +1056,11 @@ class UnifiedRouter(litellm.CustomLogger):
         # Buffer the entire stream so we can detect tool_calls before anything
         # reaches the client.  If the model picks a tool we execute it and
         # stream only the final plain-text follow-up response.
-        # Use _mcp_injected_calls (call_id set) rather than metadata because
+        # Use the _mcp_injected_calls registry rather than metadata because
         # metadata written in async_pre_call_hook is not reliably propagated
-        # to this hook's request_data.
+        # to this hook's request_data. It also carries the parent trace_id.
         if _MCP_ENABLED and call_id in _mcp_injected_calls and not meta.get("is_tool_followup"):
-            _mcp_injected_calls.discard(call_id)
+            trace_id = _mcp_injected_calls.pop(call_id) or meta.get("trace_id") or call_id
             chunks = []
             async for chunk in response:
                 chunks.append(chunk)
@@ -956,7 +1103,7 @@ class UnifiedRouter(litellm.CustomLogger):
                     args = json.loads(tc["arguments"] or "{}")
                 except Exception:
                     args = {}
-                result = await _call_mcp_tool(tc["name"], args)
+                result = await _call_mcp_tool(tc["name"], args, trace_id=trace_id)
                 tool_msgs.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -977,12 +1124,17 @@ class UnifiedRouter(litellm.CustomLogger):
             final_content = await _followup_completion(
                 model=request_data.get("model", "auto"),
                 messages=messages,
+                trace_id=trace_id,
             )
 
             if not final_content:
-                for chunk in chunks:
-                    yield chunk
-                return
+                # Do NOT replay the buffered chunks here. They carry the model's
+                # tool_calls, which the client cannot execute — LibreChat renders
+                # that as `Tool "<name>" not found`, hiding a gateway-side problem
+                # behind what looks like a missing tool.
+                final_content = _MCP_FALLBACK_MESSAGE
+                _span(trace_id, "mcp-loop/incomplete", {"hops": "exhausted or failed"},
+                      {"reason": "no final text from the loop"})
 
             # Stream final answer as two synthetic chunks
             import time as _time
@@ -1099,6 +1251,9 @@ class UnifiedRouter(litellm.CustomLogger):
         task = _image_tasks.pop(call_id, None)
         if task and not task.done():
             task.cancel()
+        # Same for the MCP registry: a failed call never reaches a post-call hook,
+        # so nothing else would remove its entry.
+        _mcp_injected_calls.pop(call_id, None)
 
         # Log failure to Langfuse (management API calls excluded by "default-message-value" check).
         if data.get("messages") == "default-message-value":

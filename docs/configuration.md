@@ -261,7 +261,17 @@ The router only rewrites the `model` field when the client sends `"auto"` or an 
 
 **Fallback:** `qwen-7b → claude-sonnet`. When the RunPod pod is cold or unavailable, LiteLLM falls back to `claude-sonnet` automatically. The virtual `auto` model also falls back to `claude-sonnet`, because the language-routing callback rewrites `auto` to a specific model *before* dispatch — if that model then fails, LiteLLM uses the fallback registered for the *original* group name (`auto`).
 
-**Langfuse spans:** The `async_log_success_event` callback logs to Langfuse only for `completion` and `acompletion` call types — management API calls (`/v2/user/info`, etc.) are skipped to avoid noise traces. Each trace may contain two types of child spans: a `routing` span recording the detected script and routed model; and `tool-result/[tool_name]` spans emitted when LibreChat runs MCP tool calls in its agentic loop, each carrying the `tool_call_id` and response content.
+**Langfuse spans:** The `async_log_success_event` callback logs to Langfuse only for `completion` and `acompletion` call types — management API calls (`/v2/user/info`, etc.) are skipped to avoid noise traces. Each trace carries:
+
+| Observation | When |
+|---|---|
+| `routing` span | every routed request — detected script and selected model |
+| `<model>/response` generation | the model call itself, with tokens and computed cost |
+| `tool-result/<name>` span | each MCP tool the gateway executed — arguments, truncated result, latency |
+| `<model>/tool-hop-N` generation | each follow-up model call in the tool loop, with its own tokens and cost |
+| `mcp-loop/incomplete` span | the loop ended without prose (hops exhausted or a follow-up failed) |
+
+The hop generations matter for cost: a follow-up call names an explicit model, so `async_pre_call_hook` returns before setting `routed_model` and `async_log_success_event` skips it. Without them the loop's token spend — often several times the first call's — would be missing from the trace entirely. `_run_agentic_loop` therefore logs each hop itself rather than relying on metadata surviving the round trip through the proxy.
 
 The routing logic lives in `docker/litellm_callbacks.py` as a `CustomLogger` pre-call hook and is controlled by `stack.yaml`:
 
@@ -412,6 +422,18 @@ the model answers with `tool_calls` — executes each call against
 `/mcp-rest/tools/call` and re-prompts, up to five hops, until the model returns a
 plain answer. Buffered streaming means a streaming client such as LibreChat sees
 only the final text. Nothing MCP-specific is configured in `librechat.yaml`.
+
+If the five hops run out, the gateway makes one more call asking the model to
+answer from the results it already has. A capable model will always find one more
+query worth running, and the request is not worth abandoning with the data
+already fetched.
+
+!!! warning "The client never receives unexecuted `tool_calls`"
+    If the loop cannot produce prose, the gateway replies with a short apology and
+    records an `mcp-loop/incomplete` span — it does **not** pass the model's
+    `tool_calls` back. A client with no MCP configuration cannot run them, and
+    LibreChat renders that as `Tool "<name>" not found`, which reads like a
+    missing tool rather than the gateway-side problem it actually is.
 
 !!! note "Tools are injected for Korean-language requests only"
     Language routing sends Korean to `claude-sonnet` and English/CJK to
