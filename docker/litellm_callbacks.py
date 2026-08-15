@@ -749,7 +749,10 @@ class UnifiedRouter(litellm.CustomLogger):
         # ── 2. Image routing ──────────────────────────────────────────────────
         if _IMAGE_RE.search(last_user):
             _image_tasks[call_id] = asyncio.ensure_future(_generate_image(last_user))
-            data["model"]      = _ENGLISH_MODEL
+            # Always use _MULTILINGUAL_MODEL (claude-sonnet) for the 1-token stub.
+            # The LLM response is discarded; Cloudflare generates the actual image.
+            # Using _ENGLISH_MODEL (qwen-7b) fails when RunPod is not running.
+            data["model"]      = _MULTILINGUAL_MODEL
             data["max_tokens"] = 1
             data["metadata"]["detected_script"] = "image"
             data["metadata"]["routed_model"]    = _IMAGE_MODEL
