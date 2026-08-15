@@ -296,7 +296,7 @@ async def _call_cloudflare(prompt: str, client: httpx.AsyncClient) -> str:
     resp = await client.post(
         f"https://api.cloudflare.com/client/v4/accounts/{cf_account}"
         f"/ai/run/@cf/black-forest-labs/flux-1-schnell",
-        json={"prompt": prompt, "num_steps": 4},
+        json={"prompt": prompt},
         headers={"Authorization": f"Bearer {cf_token}"},
         timeout=90.0,
     )
