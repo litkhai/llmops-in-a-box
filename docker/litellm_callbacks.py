@@ -677,11 +677,16 @@ class UnifiedRouter(litellm.CustomLogger):
         _pre_last_user = next(
             (m.get("content", "") for m in reversed(_pre_messages) if m.get("role") == "user"), ""
         )
+        # Only inject MCP tools for Korean (hangul) queries — those are always
+        # routed to claude-sonnet which handles tool-calling reliably.
+        # English queries go to qwen-7b which may not handle tool schemas well.
+        _pre_script = _dominant_script(_pre_last_user)
         if (
             _MCP_ENABLED
             and not data.get("tools")
             and not (data.get("metadata") or {}).get("is_tool_followup")
             and not _IMAGE_RE.search(_pre_last_user)
+            and _pre_script == "hangul"
         ):
             mcp_tools = await _get_mcp_tools()
             if mcp_tools:
