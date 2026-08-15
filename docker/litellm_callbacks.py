@@ -726,21 +726,20 @@ class UnifiedRouter(litellm.CustomLogger):
         trace_id = data["metadata"].get("trace_id") or call_id
         data["metadata"]["trace_id"] = trace_id
 
-        # ── 1. Tool-use routing — skip language routing for agentic requests ──
-        # Route tool-use requests to claude-sonnet regardless of language; it
-        # has the most reliable function-calling across all tool types.
-        if data.get("tools"):
+        # ── 1. Tool-use routing — only for client-provided tools ─────────────
+        # When tools are present but were NOT injected by us (e.g. LibreChat's
+        # own agentic mode), route to claude-sonnet for reliable function-calling.
+        # MCP-injected tools let language routing decide the model so that English
+        # queries still reach qwen-7b as expected.
+        if data.get("tools") and not data["metadata"].get("mcp_tools_injected"):
             data["model"] = _MULTILINGUAL_MODEL
             data["metadata"]["detected_script"] = "tool-use"
-            data["metadata"]["routed_model"]    = _ENGLISH_MODEL
+            data["metadata"]["routed_model"]    = _MULTILINGUAL_MODEL
             data["metadata"]["trace_name"]      = "chat/tool-use"
-            data["metadata"]["generation_name"] = f"{_ENGLISH_MODEL}/response"
-            _tool_tags = ["script:tool-use", f"routed:{_ENGLISH_MODEL}"]
-            if _VLLM_ACTIVE and _ENGLISH_MODEL == "qwen-7b":
-                _tool_tags.append("provider:runpod")
+            data["metadata"]["generation_name"] = f"{_MULTILINGUAL_MODEL}/response"
+            _tool_tags = ["script:tool-use", f"routed:{_MULTILINGUAL_MODEL}"]
             data["metadata"]["tags"]            = _tool_tags
-            _span(trace_id, "routing", {"script": "tool-use", "tools": [t.get("function", {}).get("name") for t in (data.get("tools") or [])]}, {"routed": _ENGLISH_MODEL})
-            # Log any tool results from LibreChat's agentic loop as individual spans.
+            _span(trace_id, "routing", {"script": "tool-use", "tools": [t.get("function", {}).get("name") for t in (data.get("tools") or [])]}, {"routed": _MULTILINGUAL_MODEL})
             for msg in messages:
                 if msg.get("role") == "tool":
                     _span(trace_id, f"tool-result/{msg.get('name', 'unknown')}", {"tool_call_id": msg.get("tool_call_id")}, {"content": str(msg.get("content", ""))[:500]})
