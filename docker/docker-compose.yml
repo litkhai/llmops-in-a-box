@@ -308,8 +308,8 @@ services:
       LANGFUSE_HOST: ${LITELLM_LANGFUSE_HOST:-http://langfuse-web:3000}
       LANGFUSE_TRACING_ENVIRONMENT: ${LANGFUSE_TRACING_ENVIRONMENT:-demo}
 
-      # Self-hosted GPU serving (RunPod Serverless vLLM — Phase 4).
-      # Leave blank on Phase 1/2/3 deployments; qwen-7b will fail at request time.
+      # Self-hosted GPU serving (RunPod Serverless vLLM — Phase 3+).
+      # Leave blank on Phase 1/2 deployments; qwen-7b will fail at request time.
       VLLM_API_BASE: ${VLLM_API_BASE:-}
       VLLM_API_KEY: ${VLLM_API_KEY:-}
       RUNPOD_COST_PER_TOKEN: ${RUNPOD_COST_PER_TOKEN:-0}

@@ -219,13 +219,21 @@ _MODEL_COSTS: Dict[str, tuple] = {
 }
 
 # ── model aliases (must match stack.yaml / litellm_config.yaml) ──────────────
-# Phase 4 (RunPod) activates qwen-7b; fall back to claude-sonnet when VLLM is
-# not configured (Phase 1).
-_VLLM_ACTIVE        = bool(os.environ.get("VLLM_API_BASE"))
+# Phase 3+ (RunPod) activates qwen-7b; fall back to claude-sonnet when VLLM is
+# not configured (Phase 1/2).
+_VLLM_API_BASE      = os.environ.get("VLLM_API_BASE") or ""
+_VLLM_ACTIVE        = bool(_VLLM_API_BASE)
 _ENGLISH_MODEL      = "qwen-7b" if _VLLM_ACTIVE else "claude-sonnet"
 _MULTILINGUAL_MODEL = "claude-sonnet"    # Hangul (Korean)
 _CJK_MODEL          = "qwen-7b" if _VLLM_ACTIVE else "claude-sonnet"
 _IMAGE_MODEL        = "dall-e-3"
+
+print(
+    f"[routing] startup: VLLM_API_BASE={_VLLM_API_BASE!r} "
+    f"_VLLM_ACTIVE={_VLLM_ACTIVE} "
+    f"english→{_ENGLISH_MODEL} multilingual→{_MULTILINGUAL_MODEL}",
+    flush=True,
+)
 
 # Only "auto" and "" trigger routing; explicit model names are respected.
 _ROUTABLE_ALIASES = {"auto", ""}
@@ -776,6 +784,11 @@ class UnifiedRouter(litellm.CustomLogger):
             routed = _CJK_MODEL
         else:
             routed = _ENGLISH_MODEL
+        print(
+            f"[routing] script={script} → model={routed} "
+            f"(VLLM_ACTIVE={_VLLM_ACTIVE}) preview={last_user[:60]!r}",
+            flush=True,
+        )
         data["model"] = routed
 
         tags = [f"script:{script}", f"routed:{routed}"]
