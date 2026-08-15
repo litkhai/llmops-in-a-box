@@ -20,12 +20,3 @@ endpoints:
 
 # Model catalog (from stack.yaml):
 #   claude-sonnet  Claude Sonnet 4.5 — Anthropic commercial API, format-translated by LiteLLM.
-
-mcpSettings:
-  allowedAddresses:
-    - "mcp-clickhouse:9100"
-
-mcpServers:
-  clickhouse:
-    type: sse
-    url: "http://mcp-clickhouse:9100/sse"
