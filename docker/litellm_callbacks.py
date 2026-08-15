@@ -671,11 +671,17 @@ class UnifiedRouter(litellm.CustomLogger):
         # ── 0. MCP tool injection ─────────────────────────────────────────────
         # Must run before the _ROUTABLE_ALIASES early-return so that explicitly
         # named models (e.g. "claude-sonnet") also receive ClickHouse tools.
-        # Skipped for follow-up completions that run after tool execution.
+        # Skipped for follow-up completions and image-generation requests so that
+        # image routing (step 2) is not bypassed by the tool-use routing (step 1).
+        _pre_messages = data.get("messages") or []
+        _pre_last_user = next(
+            (m.get("content", "") for m in reversed(_pre_messages) if m.get("role") == "user"), ""
+        )
         if (
             _MCP_ENABLED
             and not data.get("tools")
             and not (data.get("metadata") or {}).get("is_tool_followup")
+            and not _IMAGE_RE.search(_pre_last_user)
         ):
             mcp_tools = await _get_mcp_tools()
             if mcp_tools:
