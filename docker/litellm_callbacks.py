@@ -638,6 +638,11 @@ class UnifiedRouter(litellm.CustomLogger):
                 data["tools"] = mcp_tools
                 data["tool_choice"] = "auto"
                 data.setdefault("metadata", {})["mcp_tools_injected"] = True
+                # Force non-streaming so async_post_call_success_hook can run the
+                # agentic loop before the response reaches the client.  Without this,
+                # streaming clients (e.g. LibreChat) receive raw tool_calls chunks and
+                # try to execute MCP tools themselves, which always fails.
+                data["stream"] = False
                 # Prepend a system message so the model knows to use tools for data questions.
                 messages = data.get("messages") or []
                 if not any(m.get("role") == "system" for m in messages):
