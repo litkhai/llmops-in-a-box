@@ -638,11 +638,6 @@ class UnifiedRouter(litellm.CustomLogger):
                 data["tools"] = mcp_tools
                 data["tool_choice"] = "auto"
                 data.setdefault("metadata", {})["mcp_tools_injected"] = True
-                # Force non-streaming so async_post_call_success_hook can run the
-                # agentic loop before the response reaches the client.  Without this,
-                # streaming clients (e.g. LibreChat) receive raw tool_calls chunks and
-                # try to execute MCP tools themselves, which always fails.
-                data["stream"] = False
                 # Prepend a system message so the model knows to use tools for data questions.
                 messages = data.get("messages") or []
                 if not any(m.get("role") == "system" for m in messages):
@@ -812,47 +807,125 @@ class UnifiedRouter(litellm.CustomLogger):
         from litellm.types.utils import ModelResponseStream, StreamingChoices, Delta
 
         call_id = str(request_data.get("litellm_call_id") or id(request_data))
+        meta = request_data.get("metadata") or {}
 
-        if call_id not in _image_tasks:
-            async for chunk in response:
-                yield chunk
+        # ── Image generation ──────────────────────────────────────────────────
+        if call_id in _image_tasks:
+            try:
+                async for _ in response:
+                    pass
+            except Exception:
+                pass
+            task = _image_tasks.pop(call_id)
+            try:
+                img_markdown = await task
+            except Exception as exc:
+                img_markdown = f"Image generation failed: {exc}"
+            import time as _time
+            now = int(_time.time())
+            chunk_id = f"chatcmpl-img-{uuid.uuid4().hex[:12]}"
+            yield ModelResponseStream(
+                id=chunk_id, created=now,
+                choices=[StreamingChoices(index=0, delta=Delta(role="assistant", content=img_markdown), finish_reason=None)],
+            )
+            yield ModelResponseStream(
+                id=chunk_id, created=now,
+                choices=[StreamingChoices(index=0, delta=Delta(), finish_reason="stop")],
+            )
             return
 
-        # Drain the 1-token LLM stream without forwarding to client.
-        try:
-            async for _ in response:
-                pass
-        except Exception:
-            pass
+        # ── MCP agentic loop for streaming clients (e.g. LibreChat) ──────────
+        # Buffer the entire stream so we can detect tool_calls before anything
+        # reaches the client.  If the model picks a tool we execute it and
+        # stream only the final plain-text follow-up response.
+        if _MCP_ENABLED and meta.get("mcp_tools_injected") and not meta.get("is_tool_followup"):
+            chunks = []
+            async for chunk in response:
+                chunks.append(chunk)
 
-        task = _image_tasks.pop(call_id)
-        try:
-            img_markdown = await task
-        except Exception as exc:
-            img_markdown = f"Image generation failed: {exc}"
+            # Reconstruct tool_calls by aggregating deltas
+            finish_reason = None
+            tool_calls_map: dict = {}
+            for chunk in chunks:
+                for choice in getattr(chunk, "choices", []):
+                    fr = getattr(choice, "finish_reason", None)
+                    if fr:
+                        finish_reason = fr
+                    delta = getattr(choice, "delta", None)
+                    if not delta:
+                        continue
+                    for tc_delta in getattr(delta, "tool_calls", None) or []:
+                        idx = getattr(tc_delta, "index", 0)
+                        if idx not in tool_calls_map:
+                            tool_calls_map[idx] = {"id": "", "name": "", "arguments": ""}
+                        if getattr(tc_delta, "id", None):
+                            tool_calls_map[idx]["id"] = tc_delta.id
+                        func = getattr(tc_delta, "function", None)
+                        if func:
+                            if getattr(func, "name", None):
+                                tool_calls_map[idx]["name"] += func.name or ""
+                            if getattr(func, "arguments", None):
+                                tool_calls_map[idx]["arguments"] += func.arguments or ""
 
-        import time as _time
-        now = int(_time.time())
-        chunk_id = f"chatcmpl-img-{uuid.uuid4().hex[:12]}"
+            if finish_reason != "tool_calls" or not tool_calls_map:
+                # No tool use — pass through all buffered chunks
+                for chunk in chunks:
+                    yield chunk
+                return
 
-        yield ModelResponseStream(
-            id=chunk_id,
-            created=now,
-            choices=[StreamingChoices(
-                index=0,
-                delta=Delta(role="assistant", content=img_markdown),
-                finish_reason=None,
-            )],
-        )
-        yield ModelResponseStream(
-            id=chunk_id,
-            created=now,
-            choices=[StreamingChoices(
-                index=0,
-                delta=Delta(),
-                finish_reason="stop",
-            )],
-        )
+            # Execute each tool
+            tool_calls = list(tool_calls_map.values())
+            tool_msgs = []
+            for tc in tool_calls:
+                try:
+                    args = json.loads(tc["arguments"] or "{}")
+                except Exception:
+                    args = {}
+                result = await _call_mcp_tool(tc["name"], args)
+                tool_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "name": tc["name"],
+                    "content": result,
+                })
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": tc["id"], "type": "function",
+                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                    for tc in tool_calls
+                ],
+            }
+            messages = list(request_data.get("messages", [])) + [assistant_msg] + tool_msgs
+            final_content = await _followup_completion(
+                model=request_data.get("model", "auto"),
+                messages=messages,
+            )
+
+            if not final_content:
+                for chunk in chunks:
+                    yield chunk
+                return
+
+            # Stream final answer as two synthetic chunks
+            import time as _time
+            now = int(_time.time())
+            chunk_id = f"chatcmpl-mcp-{uuid.uuid4().hex[:12]}"
+            yield ModelResponseStream(
+                id=chunk_id, created=now,
+                choices=[StreamingChoices(index=0, delta=Delta(role="assistant", content=final_content), finish_reason=None)],
+            )
+            yield ModelResponseStream(
+                id=chunk_id, created=now,
+                choices=[StreamingChoices(index=0, delta=Delta(), finish_reason="stop")],
+            )
+            return
+
+        # ── Default pass-through ──────────────────────────────────────────────
+        async for chunk in response:
+            yield chunk
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         # Only log completion calls — skip management API noise (/v2/user/info, etc.)
