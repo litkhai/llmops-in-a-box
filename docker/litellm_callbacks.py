@@ -136,35 +136,73 @@ async def _call_mcp_tool(name: str, arguments: dict) -> str:
         return f"Tool error: {exc}"
 
 
-async def _followup_completion(model: str, messages: list) -> Optional[str]:
-    """Run a follow-up chat completion via the LiteLLM HTTP proxy.
+async def _call_model_once(model: str, messages: list) -> Optional[dict]:
+    """Single non-streaming model call via the LiteLLM HTTP proxy.
 
-    Using the HTTP endpoint (not litellm.acompletion directly) so that the
-    model alias (e.g. "claude-sonnet") is resolved through the proxy's model
-    catalog, which knows the actual provider model string.
-    The is_tool_followup flag in metadata prevents recursive tool injection.
+    Returns the raw JSON response dict, or None on error.
+    is_tool_followup prevents recursive MCP tool injection.
     """
     master_key = os.environ.get("LITELLM_MASTER_KEY", "")
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{_LITELLM_INTERNAL_URL}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {master_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "metadata": {"is_tool_followup": True},
-                    "stream": False,
-                },
+                headers={"Authorization": f"Bearer {master_key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": messages,
+                      "metadata": {"is_tool_followup": True}, "stream": False},
                 timeout=60.0,
             )
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-    except Exception:
+            return r.json()
+    except Exception as exc:
+        print(f"[mcp_loop] _call_model_once error: {exc}", flush=True)
         return None
+
+
+async def _run_agentic_loop(model: str, messages: list, max_hops: int = 5) -> Optional[str]:
+    """Multi-hop MCP agentic loop.
+
+    Calls the model, executes any tool_calls, appends results, and repeats
+    until the model returns finish_reason=stop or max_hops is reached.
+    """
+    for hop in range(max_hops):
+        resp = await _call_model_once(model, messages)
+        if not resp:
+            return None
+        choice = resp.get("choices", [{}])[0]
+        finish_reason = choice.get("finish_reason")
+        msg = choice.get("message", {})
+        content = msg.get("content")
+        tool_calls = msg.get("tool_calls")
+
+        print(f"[mcp_loop] hop={hop} finish={finish_reason} tools={bool(tool_calls)}", flush=True)
+
+        if finish_reason == "stop" or not tool_calls:
+            return content
+
+        # Execute all tool calls this hop
+        tool_msgs = []
+        for tc in tool_calls:
+            try:
+                args = json.loads(tc["function"]["arguments"] or "{}")
+            except Exception:
+                args = {}
+            result = await _call_mcp_tool(tc["function"]["name"], args)
+            tool_msgs.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "name": tc["function"]["name"],
+                "content": result,
+            })
+
+        messages = messages + [{"role": "assistant", "content": content, "tool_calls": tool_calls}] + tool_msgs
+
+    return None  # max hops reached
+
+
+async def _followup_completion(model: str, messages: list) -> Optional[str]:
+    """Compatibility shim — delegates to _run_agentic_loop."""
+    return await _run_agentic_loop(model, messages)
 
 
 # ── model costs (must match litellm_config.yaml model_info) ──────────────────
