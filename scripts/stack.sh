@@ -563,7 +563,7 @@ cmd_doctor() {
     info "Serving (external)"
     local ab; ab="$(qs '.layers.serving.options.api_base_env')"
     if [ -n "${!ab:-}" ]; then ok "$ab=${!ab}"
-    else warn "$ab unset — Phase 3 work. Deploy a pod (runpod/deploy_vllm.md) or use --profile phase-1"; fi
+    else warn "$ab unset — Phase 3 needs a RunPod Serverless endpoint (see docs/phases.md), or use --profile phase-2"; fi
   fi
 
   if resolved_layers | grep -qx observability; then
@@ -1955,15 +1955,31 @@ cmd_phases() {
     if [ "$n" = "$cur" ]; then mark="${C_GRN}▶${C_RST}"; else mark=" "; fi
     printf '%s %sPhase %s — %s%s  %s[%s]%s\n' "$mark" "$C_B" "$n" "$name" "$C_RST" "$C_DIM" "$st" "$C_RST"
     printf '    %s\n' "$scope"
-    # A phase can legitimately add nothing — Phase 5 is recipes over existing
-    # layers. Print an em dash rather than a blank, so "adds nothing" reads as
-    # deliberate instead of as a lookup that came back empty.
+    # A phase can legitimately add no model — Phase 2 is a tool layer. Print an
+    # em dash rather than a blank, so "adds nothing" reads as deliberate instead
+    # of as a lookup that came back empty.
     adds_l="$(q ".phases.\"$n\".adds_layers | join(\", \")")"
     adds_m="$(q ".phases.\"$n\".adds_models | join(\", \")")"
     printf '    %slayers:%s %s   %smodels:%s %s\n' \
       "$C_DIM" "$C_RST" "${adds_l:-—}" \
       "$C_DIM" "$C_RST" "${adds_m:-—}"
     printf '    %sprofile:%s ./scripts/stack.sh up --profile phase-%s\n\n' "$C_DIM" "$C_RST" "$n"
+  done
+
+  # Next steps are not phases: they add no layer and have no profile, so they
+  # are listed without a phase number or an `up` command.
+  local ns_count i ns_name ns_scope
+  ns_count="$(qs '.next_steps | length' 2>/dev/null || true)"
+  case "$ns_count" in ''|0|null) return 0 ;; esac
+  say "${C_B}next steps${C_RST}  ${C_DIM}(no new layers — nothing to bring up)${C_RST}"
+  say ""
+  i=0
+  while [ "$i" -lt "$ns_count" ]; do
+    ns_name="$(qs ".next_steps[$i].name")"
+    ns_scope="$(qs ".next_steps[$i].scope")"
+    printf '  %s·%s %s%s%s\n' "$C_DIM" "$C_RST" "$C_B" "$ns_name" "$C_RST"
+    printf '    %s\n\n' "$ns_scope"
+    i=$((i + 1))
   done
 }
 
@@ -2250,7 +2266,7 @@ ${C_B}FLAGS${C_RST}
   -t, --target <name>    Deployment target (default: stack.yaml defaults.target)
   -p, --profile <name>   Stack profile (default: stack.yaml defaults.profile)
       --tf-var k=v       Extra terraform variable (repeatable)
-      --phase <1..5>     secrets: operate on one build-out phase
+      --phase <1..3>     secrets: operate on one build-out phase
       --only <ENV_NAME>  secrets: operate on one credential
       --force            secrets generate: replace values that are already set
       --all              doctor/secrets: include every phase

@@ -21,11 +21,11 @@ The usual path into GenAI is not a decision, it is an accumulation. One team shi
 
 **Nobody can tell whether it is getting better.** Quality is discussed anecdotally — someone saw a bad answer, someone else believes the new prompt helped. With no scores attached to real traffic there is no baseline to regress against, so prompt and model changes ship on conviction. And because nothing measures quality, nothing can act on it: routing stays a static config that cannot respond to a route getting worse.
 
-Phase 1 breaks this by attaching five automated scores to every completion trace: three rule-based (routing accuracy, language consistency, latency) and two LLM-as-judge scores (helpfulness, language match). User ratings from LibreChat are correlated to the same traces via a content-hash sidecar. The scores are observable immediately; the routing decisions that act on them come in Phase 5.5.
+Phase 1 breaks this by attaching five automated scores to every completion trace: three rule-based (routing accuracy, language consistency, latency) and two LLM-as-judge scores (helpfulness, language match). User ratings from LibreChat are correlated to the same traces via a content-hash sidecar. The scores are observable today; the routing decisions that act on them are the [judge-scored routing next step](phases.md#judge-scored-routing).
 
 Each of these is the same problem: **there is no single point every request passes through.** The stack in this repo is the argument that creating one is the highest-leverage thing an enterprise can do early, because every other capability becomes available once it exists.
 
-The last one is also the reason the *same* point has to do both jobs. Measuring quality and deciding where a request goes are separate concerns right up until you want the first to change the second — and then they have to live together, or the loop cannot close. That is what [Phase 5.5](phases.md#55-closing-the-loop-judge-scored-routing) builds, and why it is the destination rather than a late addition.
+The last one is also the reason the *same* point has to do both jobs. Measuring quality and deciding where a request goes are separate concerns right up until you want the first to change the second — and then they have to live together, or the loop cannot close. That is what [judge-scored routing](phases.md#judge-scored-routing) builds on, and why it is the destination rather than a late addition.
 
 ---
 
@@ -104,7 +104,7 @@ A chat front end so there is something to demo, and so non-developers can use th
 
 **Considered:** Open WebUI; Chainlit or Streamlit for a bespoke UI; no UI at all (the `headless` profile exists for that).
 
-**Why LibreChat:** it is configured by a file rather than by clicking, so its model list can be generated from the same `stack.yaml` catalog as the gateway's routing table — no drift between what the UI offers and what the gateway can serve. It also supports agents and MCP tools, which is what [Phase 5.2](phases.md#52-librechat-agents-over-the-mcp-tool-layer) builds on.
+**Why LibreChat:** it is configured by a file rather than by clicking, so its model list can be generated from the same `stack.yaml` catalog as the gateway's routing table — no drift between what the UI offers and what the gateway can serve. It also supports agents and MCP tools, which is what the [LibreChat Agents next step](phases.md#librechat-agents-over-the-mcp-tool-layer) builds on. In the stack as it runs today the MCP loop is executed by the gateway instead, so tool use does not depend on the client.
 
 ### Compute — RunPod
 
@@ -115,9 +115,10 @@ GPU hosting for the serving layer.
 **Why RunPod for this stack:** per-second billing with no charge when a pod is stopped, and prebuilt vLLM templates, which together make the GPU half of the demo cheap and fast to stand up. For a reference architecture that gets brought up and torn down repeatedly, that matters more than committed-use discounts.
 
 **The trade, stated plainly:** RunPod is not the likely production destination
-for a regulated enterprise. It is the planned way to prove the architecture
-with a real GPU. Moving serving to EC2 or on-premises remains a design goal,
-not a capability implemented in this repository.
+for a regulated enterprise, and a RunPod worker is outside the deployment's own
+network. It is how the architecture is proven with a real GPU — Phase 3 serves
+English and CJK traffic from it today. Moving serving to EC2 or on-premises
+remains a design goal, not a capability implemented in this repository.
 
 ### Tools — MCP, with ClickHouse Cloud first
 
@@ -165,11 +166,13 @@ Implementations take two broad forms — **물리적 망분리**, where internal
 **Why it decides this architecture.** In a separated environment there is no route from the internal network to `api.openai.com`. This is not a matter of a firewall rule someone could be persuaded to add — the absence of that route *is* the control. So for these buyers:
 
 - Phase 1 of this stack, which sends every request to a commercial API, **cannot run inside the boundary at all**
-- the model has to be served inside the boundary, which is what [Phase 3](phases.md#phase-3--cpu-serving-and-minio-kv-cache) (CPU) and [Phase 4](phases.md#phase-4--gpu-serving-on-runpod) (GPU) are for
-- the observability stack has to be self-hosted too, since traces contain the prompts
-- `--profile airgapped` **prunes** commercial fallbacks from the generated config rather than merely disabling them — because in this context "we configured it not to" is a promise, not a control
+- neither can [Phase 3](phases.md#phase-3-gpu-serving-on-runpod) as built: `qwen-7b` is self-hosted in the sense that the weights and the serving engine are yours, but the GPU worker runs at RunPod, which is still egress
+- the model has to be served on hardware inside the boundary before any of this becomes a control, and nothing in this repository provisions that
+- the observability stack has to be self-hosted too, since traces contain the prompts — that part is already true here
 
-That last distinction is the one worth carrying into a compliance conversation. A config that *could* egress and is set not to, and a config in which the egress path does not exist, are different artifacts. This stack generates the second.
+What the gateway does buy is that this remains a configuration change rather than a migration: the model alias, the routing rule, the trace, and the policy point all live in one place, so replacing a RunPod endpoint with an in-boundary one touches `stack.yaml` and nothing else.
+
+The distinction worth carrying into a compliance conversation: a config that *could* egress and is set not to, and a config in which the egress path does not exist, are different artifacts. This stack currently generates the first. Producing the second would mean pruning commercial models and commercial fallbacks from the generated config entirely, not merely disabling them.
 
 ### ISMS-P — the certification
 
@@ -193,7 +196,7 @@ A prompt is data. If a prompt contains personal information and the request goes
 
 Two consequences for how this stack is built:
 
-1. **Guardrails have to run before egress.** A PII filter that runs on the response has already sent the prompt. This is why [Phase 5.4](phases.md#54-guardrails-at-the-gateway) treats the `pre_call` versus `post_call` distinction as the whole point rather than a detail.
+1. **Guardrails have to run before egress.** A PII filter that runs on the response has already sent the prompt. This is why [Guardrails at the gateway](phases.md#guardrails-at-the-gateway) treats the `pre_call` versus `post_call` distinction as the whole point rather than a detail.
 2. **A hosted guardrail service can reintroduce the problem it was added to solve.** Sending prompts to a third-party API to be *checked* for sensitive data is still sending them to a third party. If the deployment claims a boundary, the guardrail has to be inside it.
 
 ---

@@ -1,9 +1,9 @@
 # Build-out phases
 
-The phases are a build order, not a menu. Every layer on this page is in scope
-and intended to ship; what changes from one phase to the next is which layer is
-being built, not whether it will exist. The Status column reports implementation
-state, not scope.
+The phases are a build order, not a menu. Three phases are built and running;
+what changes from one to the next is which layer is being added, not whether it
+will exist. Everything beyond them is a [next step](#next-steps) rather than a
+phase, because it adds no layer to build.
 
 ## The end state
 
@@ -17,14 +17,10 @@ When the build-out is complete, one `stack.yaml` describes a stack in which:
 
 - every request enters through one OpenAI-compatible gateway, whichever model
   serves it
-- models are served inside the network boundary, with commercial APIs as an
-  optional addition rather than a dependency
+- models are served on infrastructure the operator chooses, with commercial APIs
+  as an optional addition rather than a dependency
 - agents reach private data through declared, scoped MCP servers instead of
   through code embedded in an application
-- datasets, eval artifacts, and model weights live in an object store the
-  operator owns
-- a long shared prompt prefix is prefilled once and reused instead of
-  recomputed on every request
 - routing, guardrails, and evaluation are configured at the gateway, so they
   apply to every client at once
 - output quality is scored automatically by a judge model, and those scores
@@ -33,28 +29,27 @@ When the build-out is complete, one `stack.yaml` describes a stack in which:
 The last bullet is the destination, not an extra feature. Every layer before it
 exists to make it possible: the gateway is the one place that both measures a
 request and decides where it goes, tracing turns quality into data instead of
-anecdote, and self-hosted serving makes a judge affordable to run on every sampled
-request and keeps prompts inside the boundary.
+anecdote, and self-hosted serving makes a judge affordable to run on every
+sampled request.
 
 One acceptance test bounds the arc:
 
 | Test | What it proves | Made possible by |
 |---|---|---|
-| An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | Phase 4 |
+| An aggregate judge score changes a routing decision, and both the score and the change are observable | the loop is closed | [Judge-scored routing](#judge-scored-routing) |
 
-This is partially in place: Phase 1 now computes five automated scores per trace
+This is partially in place: Phase 1 computes five automated scores per trace
 (routing accuracy, language consistency, latency, and two LLM-as-judge scores),
 and a user-feedback sidecar attaches ratings from LibreChat to those same traces.
-The scores exist; routing does not yet act on them. That last step is Phase 4.5.
+The scores exist; routing does not yet act on them.
 
 ## Order and current state
 
 The order is frontier-first: establish one gateway and one trace pipeline
-against commercial APIs, then add tools, self-hosted serving, storage, and
-operating recipes. Phase 1 proves the gateway, provider abstraction, tracing,
-and cost attribution without introducing GPU provisioning, so every later layer
-plugs into a request and observability path that already works. Phase profiles
-are cumulative.
+against commercial APIs, then add tools, then self-hosted serving. Phase 1
+proves the gateway, provider abstraction, tracing, and cost attribution without
+introducing GPU provisioning, so every later layer plugs into a request and
+observability path that already works. Phase profiles are cumulative.
 
 ```bash
 ./scripts/stack.sh phases
@@ -62,10 +57,9 @@ are cumulative.
 
 | Phase | Outcome | Target | Status |
 |:--:|---|---|---|
-| 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Running** (EC2) |
-| 2 | MCP tool layer | EC2 | **Runnable — ClickHouse Cloud via MCP** |
+| 1 | Frontier models through LiteLLM, traced in Langfuse | Docker or EC2 | **Running** (EC2 + Docker) |
+| 2 | MCP tool layer — ClickHouse Cloud | EC2 | **Running** (EC2) |
 | 3 | GPU serving on RunPod | EC2 + RunPod | **Running** (EC2 + RunPod) |
-| 4 | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
 
 Phase 1 runs on either `--target docker` (local) or `--target aws-ec2`. Phase 2
 and above require EC2, and RunPod is an external service regardless of where the
@@ -76,7 +70,8 @@ layer before that layer is runnable; `stack.sh` warns and skips disabled layers.
 
 ## Phase 1 — Frontier models
 
-**Adds:** LiteLLM, Langfuse, LibreChat, OpenAI, and Anthropic. No GPU.
+**Adds:** LiteLLM, Langfuse, LibreChat, Anthropic (optionally OpenAI),
+Cloudflare Workers AI for images, and the feedback sidecar. No GPU.
 
 **Target:** `docker` (local) or `aws-ec2`.
 
@@ -100,10 +95,11 @@ Acceptance criteria:
 
 The profile starts nine local containers: LiteLLM, LibreChat, the feedback sidecar, and six Langfuse services (web, worker, Postgres, Redis, MinIO, MongoDB). Langfuse connects to **ClickHouse Cloud** for trace analytics (`llmops` database) — there is no local ClickHouse container.
 
-!!! warning "Phase 1 is not sovereign"
-    Every model request goes to OpenAI or Anthropic. The gateway and tracing
-    run locally, but the model inference does not stay inside the network
-    boundary.
+!!! warning "Phase 1 sends every request to a commercial provider"
+    The gateway and tracing run inside the deployment; the model inference does
+    not. That is true of Phase 3 as well, where the GPU worker runs on RunPod.
+    Nothing in this repository serves a model inside the deployment's own
+    network boundary.
 
 ## Phase 2 — MCP tool layer
 
@@ -127,8 +123,17 @@ and `CLICKHOUSE_SECURE=true`. Tool access is declared at the **gateway** layer,
 not at the client: every app reaching LiteLLM inherits the same tools
 automatically.
 
-All tool calls are traced through LiteLLM → Langfuse alongside the model calls
-that triggered them.
+The gateway injects the tools and runs the agentic loop itself (up to five
+hops), so a client that knows nothing about MCP still gets a plain text answer
+built from tool results. All tool calls are traced through LiteLLM → Langfuse
+alongside the model calls that triggered them.
+
+!!! note "Tools are injected for Korean-language requests only"
+    Language routing sends Korean to `claude-sonnet` and English/CJK to
+    `qwen-7b`. `qwen-7b` is not reliable enough at function calling to be handed
+    tool schemas, so `UnifiedRouter` injects MCP tools only when the request is
+    Hangul-primary. Widening this means either a tool-capable self-hosted model
+    or routing tool-shaped requests to `claude-sonnet` regardless of language.
 
 Acceptance criteria:
 
@@ -145,15 +150,15 @@ grants determine what the agent can do.
 
 ## Phase 3 — GPU serving on RunPod
 
-**Adds:** vLLM and `qwen-7b` on a RunPod GPU endpoint alongside the commercial
-APIs. Language routing directs Korean to `claude-sonnet` and English/CJK to
-`qwen-7b`.
+**Adds:** vLLM and `qwen-7b` on a RunPod Serverless endpoint alongside the
+commercial APIs. Language routing directs Korean to `claude-sonnet` and
+English/CJK to `qwen-7b`.
 
 **Target:** `aws-ec2` + RunPod. The gateway and observability stack run on EC2;
 the GPU inference endpoint is provisioned separately on RunPod.
 
 The serving layer is externally managed — not a Compose container. LiteLLM
-needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The GPU pod is
+needs only an authenticated OpenAI-compatible `VLLM_API_BASE`. The endpoint is
 provisioned in the RunPod console; nothing in this repository changes.
 
 Acceptance criteria:
@@ -161,20 +166,24 @@ Acceptance criteria:
 - `claude-sonnet` and `qwen-7b` use the same client protocol and both appear in
   one Langfuse project
 - traces for `qwen-7b` carry the `provider:runpod` tag
-- `qwen-7b` falls back to `claude-sonnet` when the RunPod pod is stopped
+- `qwen-7b` falls back to `claude-sonnet` when the RunPod endpoint is stopped
 - GPU runtime cost is configurable via `RUNPOD_COST_PER_TOKEN`
 
 `qwen-7b` falls back to `claude-sonnet` in connected profiles (600 s timeout
-accounts for RunPod cold start).
+accounts for RunPod Serverless cold start; `min_workers=1` in the RunPod console
+avoids it).
 
-## Phase 4 — Operating recipes
+## Next steps
 
-Phase 4 adds no infrastructure layer. It demonstrates how to operate the
-gateway, tools, serving, and trace data built earlier — and in 4.4 it joins
-routing to scoring, which is the capability the earlier phases were building
-toward.
+These are not phases. Each one is a way of operating the gateway, tools,
+serving, and trace data the three phases already deliver — no new layer, no new
+container, and therefore no profile to bring up. Giving them phase numbers would
+imply a deployable artifact that does not exist.
 
-### 4.1 Context-based routing in LiteLLM
+`./scripts/stack.sh phases` prints them beneath the three phases, from the
+`next_steps` block in `stack.yaml`.
+
+### Context-based routing
 
 Start with deterministic rules: explicit tenant policy, requested capability,
 context-window fit, health, and budget. LiteLLM can route an over-length
@@ -208,26 +217,25 @@ Acceptance criteria:
 - short and over-length requests select models that can serve them
 - route decisions and classifier confidence are observable
 - low-confidence or failed classification takes a safe default
-- self-hosted-only routing never introduces a commercial candidate
 
-### 4.2 LibreChat Agents over the MCP tool layer
+### LibreChat Agents over the MCP tool layer
 
 Configure an agent with the Phase 2 MCP server and verify that one trace
 contains planning, tool use, and the final response. Use only the dedicated
 read-only database credential.
 
-### 4.3 Langfuse evaluations
+### Langfuse evaluations
 
 Create a dataset from real traces, apply an explicit scoring rubric, and compare
 cost and quality across the same inputs. Record the judge model; using a model
 to judge itself can bias the result.
 
-### 4.4 Guardrails at the gateway
+### Guardrails at the gateway
 
 Gateway guardrails cover every client. PII and prompt-injection checks must run
-before a request leaves the boundary; output moderation runs after inference.
-A hosted guardrail also receives the prompt, so it cannot be used to support
-an air-gapped claim.
+before a request leaves the deployment; output moderation runs after inference.
+A hosted guardrail also receives the prompt, so it cannot be used to support an
+in-boundary claim.
 
 Acceptance criteria:
 
@@ -235,11 +243,11 @@ Acceptance criteria:
 - the trace shows which guardrail ran and its outcome
 - false positives, false negatives, and latency are measured
 
-### 4.5 Closing the loop — judge-scored routing
+### Judge-scored routing
 
-4.1 decides where a request goes. 4.3 decides how good the answer was. Joining
-them is the point of the build-out: scores stop being a dashboard and become an
-input to routing.
+Context-based routing decides where a request goes. Langfuse evaluations decide
+how good the answer was. Joining them is the point of the build-out: scores stop
+being a dashboard and become an input to routing.
 
 There are two loops here, and conflating them is the mistake to avoid — they
 have different costs and different failure modes.
@@ -260,19 +268,19 @@ latency only where a wrong answer costs more than a slow one.
 Constraints that do not relax:
 
 - **A judge score must not control residency, security, or hard budget
-  boundaries.** This is the same rule 4.1 applies to the intent classifier.
+  boundaries.** This is the same rule that applies to the intent classifier.
   Quality may choose among already-permitted routes; it may not widen the
   permitted set.
 - **The judge is a model, so it is traced and costed like any other call.** Its
   spend belongs in the same Langfuse view as the traffic it judges, or the
   loop's own cost stays invisible while it changes routing.
-- **A model judging its own output biases the result** (4.3). If the judge and a
+- **A model judging its own output biases the result.** If the judge and a
   candidate route are the same model, that comparison is not neutral.
 - **Sample until judge/human agreement is measured.** An unvalidated judge
   driving automated routing is an unmeasured system changing its own behaviour.
-- **A hosted judge defeats sovereignty.** A hosted judge API receives the prompt
-  and the completion, so it defeats the network boundary for exactly the reason
-  a hosted guardrail does in 4.4. Use the self-hosted serving layer as the judge.
+- **A hosted judge sees the prompt.** It receives both the prompt and the
+  completion, for exactly the reason a hosted guardrail does. Any claim about a
+  boundary requires the judge to be inside it.
 
 Acceptance criteria:
 
@@ -290,7 +298,7 @@ Acceptance criteria:
 | `phase-1` | gateway, observability, UI | `claude-sonnet` |
 | `phase-2` | Phase 1 + tools | `claude-sonnet` |
 | `phase-3` | Phase 2 + GPU serving (RunPod) | `claude-sonnet` + `qwen-7b` |
-| `phase-4` | Same infrastructure as Phase 3 | all |
 | `headless` | gateway and observability | enabled models |
+| `full` | every layer whose `enabled` is true | enabled models |
 
 `stack.yaml` remains authoritative for exact membership and current status.

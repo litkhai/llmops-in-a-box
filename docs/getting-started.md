@@ -9,7 +9,7 @@ eventually runs.
 | Target | Scope | Status |
 |---|---|---|
 | `docker` | Phase 1 only — local development and iterating on the gateway | **Runnable** |
-| `aws-ec2` | Phase 1 through 5 — primary demo and shared deployment target | **Runnable** |
+| `aws-ec2` | Phases 1 – 3 — primary demo and shared deployment target | **Running** |
 | `k8s` | Future production deployment | Planned |
 
 **Phase 1** (`--target docker`) is the right starting point. It runs the full
@@ -18,14 +18,13 @@ external provider APIs. No GPU, no EC2, no cloud account required.
 
 **Phase 2 and above require `--target aws-ec2`.** The reasons are practical:
 
-- CPU inference (Phase 3) is too slow on a laptop to demo usefully — it runs on
-  the EC2 instance's own CPUs, which is also what the acceptance criteria
-  assumes.
-- RunPod GPU serving (Phase 4) is an external service regardless of where the
-  gateway lives; running the gateway on EC2 keeps latency predictable and avoids
-  NAT traversal.
 - ClickHouse Cloud MCP (Phase 2) requires outbound internet access, which EC2
   already has and a secured laptop may not.
+- RunPod GPU serving (Phase 3) is an external service regardless of where the
+  gateway lives; running the gateway on EC2 keeps latency predictable and avoids
+  NAT traversal.
+- The shared demo needs a stable address and HTTPS, which the EC2 target provides
+  through Caddy.
 
 The Phase 1 workshop below applies to both targets. Start locally if you want
 to iterate quickly; provision EC2 when you are ready for Phase 2 or a shared
@@ -47,7 +46,7 @@ brew install yq
 docker info --format 'CPUs={{.NCPU}}  Memory={{.MemTotal}}'
 ```
 
-The stack publishes ports `3000`, `3080`, `4000`, `8123`, `9001`, and `9002`.
+The stack publishes ports `3000`, `3080`, `4000`, `8080`, `9001`, and `9002`.
 If one is occupied, either stop its owner or override the corresponding port
 when starting the stack.
 
@@ -121,3 +120,18 @@ EC2 key pair in `ap-northeast-2`.
 
 See [Deployment — AWS EC2](deployment.md#aws-ec2) for the full guide, including
 optional HTTPS setup with a custom domain.
+
+## Moving to Phase 3
+
+Phase 3 adds `qwen-7b` on a RunPod Serverless endpoint. Create the endpoint in
+the RunPod console first (vLLM worker template, `Qwen/Qwen2.5-7B-Instruct`), then:
+
+```bash
+./scripts/stack.sh secrets setup --phase 3     # VLLM_API_BASE, VLLM_API_KEY
+./scripts/stack.sh secrets push --target aws-ec2
+./scripts/stack.sh up --profile phase-3 --target aws-ec2
+```
+
+Language routing starts sending English and CJK traffic to `qwen-7b` as soon as
+`VLLM_API_BASE` is set. See
+[Deployment — Phase 3](deployment.md#phase-3-gpu-serving-on-runpod).

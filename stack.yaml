@@ -29,58 +29,86 @@ project:
   owner: ken.lee@clickhouse.com
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Build-out phases — the order this stack is actually being built.
+#  Build-out phases — the order this stack was actually built.
 #
 #  Each phase has a matching profile below, so `--profile phase-1` brings up
-#  exactly the scope of that phase and nothing more. `current` is what the
-#  default profile tracks; bump it as each phase lands.
+#  exactly the scope of that phase and nothing more. `current` is the highest
+#  phase that is running; all three are deployed on the aws-ec2 target today.
+#
+#  Anything beyond Phase 3 is in `next_steps` below rather than in a phase:
+#  those are things to *do* with the stack, not layers to add to it, so they
+#  add no profile and no container.
 # ─────────────────────────────────────────────────────────────────────────────
 phases:
-  current: 1
+  current: 3
   1:
     name: Frontier models
-    status: in_progress
+    status: running
     scope: >-
-      LiteLLM gateway + Langfuse observability + LibreChat, OpenAI and
-      Anthropic models only. No GPU, no self-hosting.
+      LiteLLM gateway + Langfuse observability + LibreChat, Anthropic (and
+      optionally OpenAI) models, Cloudflare image generation, and the user
+      feedback sidecar. No GPU, no self-hosting.
     adds_layers: [gateway, observability, ui]
     adds_models: [claude-sonnet]
   2:
     name: MCP tool layer
-    status: not_built
+    status: running
     scope: >-
       MCP servers exposed to the gateway so tool-use is traced through the
       same pipeline. First server is ClickHouse Cloud — settled, not a
-      shortlist.
+      shortlist. Tools are injected at the gateway, so no client wiring.
     adds_layers: [tools]
     adds_models: []
   3:
     name: GPU serving on RunPod
     status: running
     scope: >-
-      vLLM on a RunPod GPU pod behind the same gateway. Language routing
-      directs Korean to claude-sonnet and English/CJK to qwen-7b. GPU runtime
-      cost is tracked via RUNPOD_COST_PER_TOKEN and traces carry the
+      vLLM on a RunPod Serverless endpoint behind the same gateway. Language
+      routing directs Korean to claude-sonnet and English/CJK to qwen-7b. GPU
+      runtime cost is tracked via RUNPOD_COST_PER_TOKEN and traces carry the
       provider:runpod tag.
     adds_layers: [serving]
     adds_models: [qwen-7b]
-  4:
-    name: Operating recipes
-    status: not_built
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Next steps — operating recipes over the layers Phases 1-3 already deliver.
+#
+#  Deliberately NOT phases: they add no layer, no profile, and no container, so
+#  giving them a phase number would imply an artifact that does not exist. They
+#  are recorded here so the intended end state stays visible.
+#  Consumed by `stack.sh phases` for display only.
+# ─────────────────────────────────────────────────────────────────────────────
+next_steps:
+  - name: Context-based routing
     scope: >-
-      No new layers. Context-based routing in LiteLLM, LibreChat Agents over
-      the Phase 2 MCP tools, Langfuse evaluations, gateway guardrails, and
-      finally judge-scored routing — aggregate judge scores feeding back into
-      where requests go. That loop is the destination Phases 1-3 exist to make
-      possible: it needs one point that both measures a request and decides
-      its route.
-    adds_layers: []
-    adds_models: []
+      Deterministic rules first — tenant policy, capability, context-window
+      fit, health, budget — then an intent classifier in front of them.
+  - name: LibreChat Agents over the MCP tool layer
+    scope: >-
+      An agent configured against the Phase 2 MCP server, with planning, tool
+      use, and the final response in one trace.
+  - name: Langfuse evaluations
+    scope: >-
+      Datasets built from real traces, an explicit rubric, and cost/quality
+      compared across the same inputs.
+  - name: Guardrails at the gateway
+    scope: >-
+      PII and prompt-injection checks before egress, output moderation after
+      inference, both traced. A hosted guardrail sees the prompt, so it cannot
+      support an in-boundary claim.
+  - name: Judge-scored routing
+    scope: >-
+      Aggregate judge scores feeding back into where requests go. The loop the
+      earlier phases exist to make possible: it needs one point that both
+      measures a request and decides its route. Phase 1 already computes the
+      scores; nothing routes on them yet.
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Defaults used when the CLI flags are omitted.
-#  Tracks phases.current — Phase 1 is frontier APIs, so no GPU is required to
-#  bring the stack up today.
+#
+#  Not phases.current: the default target is `docker`, whose scope is Phase 1,
+#  so `up` with no flags stays a laptop-friendly frontier-API stack. The EC2
+#  deployment runs `--profile phase-3`.
 # ─────────────────────────────────────────────────────────────────────────────
 defaults:
   target: docker      # Phase 1 only; use --target aws-ec2 for Phase 2+
@@ -94,11 +122,12 @@ defaults:
 #            models whose `enabled: true`.
 #
 #  The phase-N profiles are cumulative: phase-3 includes everything phase-1 and
-#  phase-2 brought up. phase-4 shares the same layers as phase-3.
+#  phase-2 brought up. There is no phase-4 profile — the `next_steps` items add
+#  no layer, so they have nothing to bring up.
 # ─────────────────────────────────────────────────────────────────────────────
 profiles:
 
-  # ── Phase 1 (current) — frontier APIs only. No GPU pod needed. ──
+  # ── Phase 1 — frontier APIs only. No GPU endpoint needed. ──
   phase-1:
     description: "Phase 1 — frontier models (OpenAI + Anthropic), no self-hosting"
     layers: [gateway, observability, ui]
@@ -110,16 +139,11 @@ profiles:
     layers: [gateway, observability, ui, tools]
     models: [claude-sonnet]
 
-  # ── Phase 3 — GPU serving on RunPod alongside Phase 2 layers. ──
+  # ── Phase 3 (current) — GPU serving on RunPod alongside Phase 2 layers. ──
   #    `serving` (RunPod) requires VLLM_API_BASE; the resolver skips it if unset.
+  #    This is the profile the aws-ec2 deployment runs.
   phase-3:
     description: "Phase 3 — Phase 2 plus GPU serving on RunPod"
-    layers: [gateway, observability, ui, tools, serving]
-
-  # ── Phase 4 — operating recipes. Same layers as Phase 3 by design: these
-  #    are things to *do* with the stack, not things to add to it. ──
-  phase-4:
-    description: "Phase 4 — Phase 3 plus operating recipes (no new layers)"
     layers: [gateway, observability, ui, tools, serving]
 
   # ── Convenience aliases, independent of phase ──
@@ -158,11 +182,11 @@ targets:
       different `--target` flag.
     dir: terraform
     host: null                  # resolved from the `public_ip` terraform output
-    supported_phases: [1, 2, 3, 4]
+    supported_phases: [1, 2, 3]
     notes:
       3: >-
-        Requires VLLM_API_BASE pointing at a live RunPod pod. GPU KV cache stays
-        pod-local on the RunPod worker.
+        Requires VLLM_API_BASE pointing at a live RunPod Serverless endpoint.
+        The GPU worker is provisioned in the RunPod console, not by this repo.
     vars:
       instance_type: t3.xlarge
       volume_size_gb: 100
@@ -182,6 +206,7 @@ targets:
         litellm: litellm   # litellm.example.com
         langfuse: langfuse # langfuse.example.com
         librechat: chat    # chat.example.com
+        media: media       # media.example.com — MinIO, serves generated images
 
   k8s:
     kind: helm

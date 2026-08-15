@@ -81,7 +81,7 @@ These values must be obtained from their provider or environment:
 | Phase 1 Langfuse tracing | `CLICKHOUSE_CLOUD_HOST`, `LANGFUSE_CLICKHOUSE_USER`, `LANGFUSE_CLICKHOUSE_PASSWORD` | ClickHouse Cloud host and writer credentials for the `llmops` database |
 | Phase 2 MCP | `CLICKHOUSE_CLOUD_USER`, `CLICKHOUSE_CLOUD_PASSWORD` | ClickHouse Cloud admin credentials — use a dedicated read-only database user |
 | Phase 1 image gen | `CF_API_TOKEN`, `CF_ACCOUNT_ID` | Free tier; absent silently disables image generation |
-| Phase 4 GPU serving | `RUNPOD_API_KEY`, `VLLM_API_BASE`, `VLLM_API_KEY` | The vLLM base URL must end in `/v1` |
+| Phase 3 GPU serving | `VLLM_API_BASE`, `VLLM_API_KEY`, `RUNPOD_COST_PER_TOKEN` | The base URL must end in `/v1`; the key is a RunPod API key |
 | AWS target | `AWS_PROFILE` or a static access-key pair | Prefer IAM Identity Center / SSO |
 
 The `console` and `notes` fields in the credential inventory contain the

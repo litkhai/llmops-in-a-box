@@ -9,7 +9,7 @@ with [Getting started](getting-started.md).
 | Target | Phases | Lifecycle | Status |
 |---|---|---|---|
 | `docker` | 1 only | Docker Compose | **Runnable** |
-| `aws-ec2` | 1 – 5 | Terraform → EC2 → Compose | **Runnable** |
+| `aws-ec2` | 1 – 3 | Terraform → EC2 → Compose | **Running** (`--profile phase-3`) |
 | `k8s` | — | Helm | Planned and disabled |
 
 `docker` is the right choice for iterating on Phase 1 without needing an AWS
@@ -44,18 +44,18 @@ requests.
 | Langfuse | `3000` |
 | LibreChat | `3080` |
 | LiteLLM | `4000` |
-| ClickHouse HTTP | `8123` |
+| Feedback sidecar | `8080` |
 | MinIO console | `9001` |
 | MinIO API | `9002` |
 
 Ports can be remapped for one invocation:
 
 ```bash
-LANGFUSE_PORT=3100 CLICKHOUSE_HTTP_PORT=8124 ./scripts/stack.sh up
+LANGFUSE_PORT=3100 MINIO_API_PORT=9012 ./scripts/stack.sh up
 ```
 
-Postgres, Redis, MongoDB, ClickHouse's native protocol, and the Langfuse worker
-are not published to the host.
+Postgres, Redis, MongoDB, and the Langfuse worker are not published to the host.
+Trace analytics live in ClickHouse Cloud, so there is no local ClickHouse port.
 
 ### Data and teardown
 
@@ -71,11 +71,11 @@ Service credentials initialized into a persistent database or object-store
 volume do not rotate merely because `.env` changes. Rotate the account inside
 the service or recreate disposable volumes.
 
-## AWS EC2 (Phase 2+)
+## AWS EC2
 
-The primary deployment target from Phase 2 onwards. A single EC2 instance
-running the same Docker Compose stack. Region: `ap-northeast-2`. Instance:
-`t3.xlarge`, 100 GiB gp3.
+The primary deployment target from Phase 2 onwards, and where all three phases
+run today. A single EC2 instance running the same Docker Compose stack. Region:
+`ap-northeast-2`. Instance: `t3.xlarge`, 100 GiB gp3.
 
 Services are accessible via direct port (3000, 3080, 4000) or, when a domain
 is configured, via HTTPS subdomains (`chat.<domain>`, `langfuse.<domain>`,
@@ -164,6 +164,14 @@ script to complete. The bootstrap script:
 3. Pulls all credentials (including `DOMAIN_BASE`) from SSM
 4. Starts the Phase 1 compose stack
 5. If `DOMAIN_BASE` is set: renders `Caddyfile` and starts the Caddy proxy
+
+Bootstrap deliberately stops at Phase 1 — it is the scope that needs no MCP or
+RunPod credentials. Move the instance to Phase 2 or 3 with one command once those
+are pushed to SSM:
+
+```bash
+./scripts/stack.sh up --profile phase-3 --target aws-ec2
+```
 
 ### 4. Verify
 
@@ -306,15 +314,36 @@ accessible only within the Docker network by the LiteLLM container.
 
 ---
 
-## GPU serving — vLLM on RunPod
+## Phase 3 — GPU serving on RunPod
 
-Phase 4 is not built yet and is not required for the current demo. The design
-treats vLLM as an externally managed OpenAI-compatible endpoint rather than a
-local Compose service. When implemented, it will require:
+vLLM is an externally managed OpenAI-compatible endpoint, not a Compose service:
+the RunPod Serverless endpoint is created in the RunPod console (Serverless → New
+Endpoint → vLLM worker template) with `Qwen/Qwen2.5-7B-Instruct`, and the gateway
+only needs to be told where it is.
 
-- a live `VLLM_API_BASE` ending in `/v1`
-- a `VLLM_API_KEY`
-- a running GPU endpoint, initially expected on RunPod
+```bash
+./scripts/stack.sh secrets setup --phase 3   # VLLM_API_BASE, VLLM_API_KEY, RUNPOD_COST_PER_TOKEN
+./scripts/stack.sh secrets push --target aws-ec2
+./scripts/stack.sh up --profile phase-3 --target aws-ec2
+```
+
+Requirements:
+
+- `VLLM_API_BASE` — `https://api.runpod.ai/v2/<endpoint_id>/openai/v1`, ending in `/v1`
+- `VLLM_API_KEY` — a RunPod API key
+- a GPU tier of RTX 3090 or better (~24 GiB VRAM for a 7B bfloat16 model)
+
+Operational notes:
+
+- `qwen-7b` carries a 600 s timeout because a serverless cold start can take
+  minutes. Set `min_workers=1` in the RunPod console to avoid it, at the cost of
+  a permanently billed worker.
+- `qwen-7b` falls back to `claude-sonnet`, so a stopped endpoint degrades to the
+  commercial API instead of failing. Traces tagged `fallback:true` and scored
+  `routing_accuracy=0` are how that shows up.
+- `RUNPOD_COST_PER_TOKEN` sets the per-token cost used for Langfuse cost
+  attribution. Pod-hour billing is not derived automatically — see the comment
+  in `docker/litellm_callbacks.py` for the arithmetic.
 
 Do not expose a vLLM endpoint without authentication; a public unauthenticated
 GPU endpoint can be used by anyone.

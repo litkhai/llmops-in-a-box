@@ -3,14 +3,15 @@
 A ten-minute walkthrough. The arc is **config → traffic → observability → the ClickHouse close**.
 
 !!! note "Phase 1 — local or EC2"
-    This walkthrough covers the Phase 1 demo: two frontier models through one
-    gateway, fully traced. It runs on either `--target docker` (local) or
+    The main arc covers the Phase 1 demo: frontier models through one gateway,
+    fully traced. It runs on either `--target docker` (local) or
     `--target aws-ec2`. Phase 2 and above require EC2 — see
     [the Phase 2 variation below](#variation-from-phase-2).
 
-!!! tip "Phase 4 variation"
-    From Phase 4 you open with the RunPod pod instead — see
-    [the Phase 4 variation below](#variation-from-phase-4).
+!!! tip "Running the full stack"
+    On the EC2 deployment all three phases are live, so you can open with the
+    self-hosted model instead — see
+    [the Phase 3 variation below](#variation-from-phase-3).
 
 ---
 
@@ -156,25 +157,28 @@ all.
 
 ---
 
-## Variation — from Phase 4
+## Variation — from Phase 3
 
-This variation arrives with Phase 4. It is not part of the current runnable
-demo.
+**Target:** `aws-ec2` + a live RunPod Serverless endpoint. This is what the EC2
+deployment runs today, so it is a variation only in where you start the story.
 
 Open with the serving layer instead, then follow the same arc:
 
-1. **Serving** — show the RunPod pod running vLLM. *Your model, your infrastructure, live in minutes.* Contrast with EC2 GPU setup: AMI, drivers, networking, quota requests.
-2. **Traffic** — now include `qwen-7b` in the comparison. Same client code, one string changed.
+1. **Serving** — show the RunPod Serverless endpoint running vLLM. *Your model, your weights, live in minutes.* Contrast with EC2 GPU setup: AMI, drivers, networking, quota requests.
+2. **Traffic** — the English prompt from step 2 is already being served by `qwen-7b`. Same client code, no string changed — the gateway decided.
 3. **Observability** — the cost comparison becomes the centrepiece: self-hosted at zero marginal token cost against per-token API pricing, in one chart.
 4. **Close** — as above.
 
-Optional, if the room is compliance-minded:
+Worth rehearsing: stop the RunPod endpoint and send the English prompt again.
+`qwen-7b` falls back to `claude-sonnet`, the trace is tagged `fallback:true`, and
+`routing_accuracy` scores `0`. A demo that shows a degradation being *measured*
+lands better than one that shows only the happy path.
 
-```bash
-./scripts/stack.sh up --profile airgapped
-```
-
-Only self-hosted models resolve; the commercial API fallback is **pruned from the generated config**, not merely discouraged. Relevant to 망분리 / ISMS-P contexts where "we configured it not to" is not an acceptable control.
+If the room is compliance-minded, be straight about the boundary: the weights and
+the serving engine are yours, but the GPU is RunPod's, so this is not 망분리. What
+the architecture buys is that moving inference in-boundary is a `stack.yaml`
+change rather than a migration — see
+[Background — 망분리](background.md#network-separation).
 
 ---
 

@@ -129,12 +129,13 @@ Resolves the config for a chosen `--target` and `--profile`, then renders the mo
 | `secrets status \| validate` | Report presence and check formats without printing values |
 | `secrets write \| generate \| audit` | Automation primitives and leak checks |
 | `secrets push` | Push `.env` values to SSM Parameter Store (aws-ec2 target) |
-| `phases` | Build-out phases and current status |
+| `phases` | Build-out phases, current status, and the next steps beyond them |
 | `config` | Resolved stack for the selected target/profile |
 | `models` | Model table with per-1k costs |
 | `render` | Regenerate `litellm_config.yaml`, `librechat.yaml`, and (aws-ec2) `Caddyfile` |
 | `up` | Render, then deploy to the selected target |
 | `status` | Curl every health check for active layers |
+| `smoke-test` | Send one request end to end and verify the trace reached Langfuse |
 | `urls` | Print the endpoint list |
 | `logs` | Follow compose logs |
 | `down` | Tear down (`--purge` also drops volumes) |
@@ -161,23 +162,29 @@ Resolves the config for a chosen `--target` and `--profile`, then renders the mo
 ## Inspecting the resolved stack
 
 ```console
-$ ./scripts/stack.sh config
+$ ./scripts/stack.sh config --target aws-ec2 --profile phase-3
 project  llmops-in-a-box (demo)
-target   docker — Single-node Docker Compose on a laptop
-profile  phase-1 — Phase 1 — frontier models (OpenAI + Anthropic), no self-hosting
+target   aws-ec2 — Primary deployment target for Phase 2 and above. …
+profile  phase-3 — Phase 3 — Phase 2 plus GPU serving on RunPod
 
 layers
   gateway        litellm      compose    gateway
   observability  langfuse     compose    obs
   ui             librechat    compose    ui
+  tools          mcp          compose    tools
+  serving        vllm         runpod
 
-compose profiles  gateway obs ui
-models            claude-sonnet
+compose profiles  gateway obs ui tools
+models            qwen-7b claude-sonnet
 ```
 
+`serving` has no compose profile because RunPod owns its lifecycle — the row is
+there to show it resolved, not to start a container.
+
 ```console
-$ ./scripts/stack.sh models
+$ ./scripts/stack.sh models --profile phase-3
 ALIAS           TIER         LITELLM_MODEL                          IN/1k      OUT/1k
+qwen-7b         self_hosted  openai/Qwen/Qwen2.5-7B-Instruct        0.0        0.0
 claude-sonnet   commercial   anthropic/claude-sonnet-4-5            0.003      0.015
 ```
 
@@ -248,7 +255,7 @@ LiteLLM routes chat requests automatically by the dominant script of the last us
 | CJK (Chinese, Japanese) | `qwen-7b` |
 | Latin (English, etc.) | `qwen-7b` |
 
-Detection is a pure Unicode heuristic: if more than 15 % of the message's characters have code points above U+024F (where extended Latin ends), the message is classified as non-Latin. A single Korean word in an otherwise-English sentence does **not** flip the route.
+Detection is a pure Unicode heuristic over the last user message, checked in priority order: Hangul first (syllables, Jamo, compatibility Jamo), then CJK ideographs and kana, then Latin as the default. A script wins when more than 15 % of the message's characters belong to it, so a single Korean word in an otherwise-English sentence does **not** flip the route. No extra network call; under 1 ms added to p99.
 
 The router only rewrites the `model` field when the client sends `"auto"` or an empty string. Any other value (e.g. `"claude-sonnet"`) is treated as an explicit model choice and left untouched. Non-chat requests (`call_type` not in `{"completion", "acompletion"}`) bypass the callback entirely.
 
@@ -397,6 +404,24 @@ as a database client and exposes an SSE endpoint on port 9100 inside the Docker
 network. `mcp-proxy` wraps its stdio transport. That port is internal to the
 Docker network — no security group change needed for the aws-ec2 target.
 
+### Where the tool loop runs
+
+The gateway owns the whole loop. `UnifiedRouter` fetches the tool definitions
+from LiteLLM's `/mcp-rest/tools/list`, injects them into the request, and — when
+the model answers with `tool_calls` — executes each call against
+`/mcp-rest/tools/call` and re-prompts, up to five hops, until the model returns a
+plain answer. Buffered streaming means a streaming client such as LibreChat sees
+only the final text. Nothing MCP-specific is configured in `librechat.yaml`.
+
+!!! note "Tools are injected for Korean-language requests only"
+    Language routing sends Korean to `claude-sonnet` and English/CJK to
+    `qwen-7b`, and `qwen-7b` is not reliable enough at function calling to be
+    handed tool schemas. So `UnifiedRouter` injects MCP tools only when the last
+    user message is Hangul-primary, and skips injection for image-intent
+    messages and for its own follow-up completions. Tools supplied by the
+    *client* are handled separately: those route to `claude-sonnet` regardless of
+    language.
+
 ### stack.yaml — tools layer
 
 ```yaml
@@ -524,16 +549,29 @@ targets:
 ```yaml title="docker/litellm_config.yaml (generated)"
 # GENERATED by scripts/stack.sh render — DO NOT EDIT.
 # Edit stack.yaml and re-run `./scripts/stack.sh render`.
-# profile: phase-1
+# profile: phase-3
 
 model_list:
+  - model_name: qwen-7b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-7B-Instruct
+      api_base: os.environ/VLLM_API_BASE
+      api_key: os.environ/VLLM_API_KEY
+      rpm: 60
+      tpm: 200000
+      timeout: 600
+    model_info:
+      mode: chat
+      max_input_tokens: 32768
+      input_cost_per_token: 0
+      output_cost_per_token: 0
   - model_name: claude-sonnet
     litellm_params:
       model: anthropic/claude-sonnet-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
       rpm: 500
       tpm: 400000
-      timeout: 5
+      timeout: 30
     model_info:
       mode: chat
       max_input_tokens: 200000
@@ -545,5 +583,9 @@ model_list:
     model_info:
       mode: chat
 ```
+
+The committed copy is rendered with `--profile phase-3`, which is what the EC2
+deployment runs. `render --profile phase-1` produces the same file without
+`qwen-7b` and without the `mcp_servers` block.
 
 They are committed anyway, so a reader can see the gateway config without running anything. Use `--no-render` for a one-off manual override.

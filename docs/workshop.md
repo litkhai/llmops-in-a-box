@@ -25,13 +25,14 @@ Expected endpoints:
 |---|---|---|
 | LibreChat | <http://localhost:3080> | Chat UI and model picker |
 | LiteLLM | <http://localhost:4000> | OpenAI-compatible gateway |
-| Langfuse | <http://localhost:3000> | Traces and cost |
-| ClickHouse | <http://localhost:8123/ping> | Langfuse trace store |
-| MinIO | <http://localhost:9001> | Langfuse blob-store console |
+| Langfuse | <http://localhost:3000> | Traces, scores, and cost |
+| Feedback sidecar | <http://localhost:8080/health> | Ratings → Langfuse scores |
+| MinIO | <http://localhost:9001> | Blob-store console |
 
-Nine containers implement three visible layers. Langfuse requires a web
-service, worker, ClickHouse, Postgres, Redis, and MinIO; LibreChat also requires
-MongoDB.
+Nine containers implement three visible layers. Langfuse requires a web service,
+worker, Postgres, Redis, and MinIO; LibreChat also requires MongoDB; the gateway
+runs alongside the feedback sidecar. Trace analytics live in **ClickHouse
+Cloud** — there is no local ClickHouse container to open.
 
 ## 2. Log in
 
@@ -79,7 +80,9 @@ contains no Langfuse integration; LiteLLM emitted the trace.
 
 ## 4. Compare providers
 
-If both provider keys are configured:
+`qwen-7b` resolves only when the stack is running `--profile phase-3` with a live
+RunPod endpoint. On a Phase 1 laptop run, compare `claude-sonnet` against a second
+commercial alias instead, or skip to the next step.
 
 ```python
 for model in ["qwen-7b", "claude-sonnet"]:
@@ -144,7 +147,7 @@ can make stored encrypted data unreadable.
     Override it for the process:
 
     ```bash
-    LANGFUSE_PORT=3100 CLICKHOUSE_HTTP_PORT=8124 ./scripts/stack.sh up
+    LANGFUSE_PORT=3100 MINIO_API_PORT=9012 ./scripts/stack.sh up
     ```
 
 ??? failure "A service remains unhealthy"
@@ -227,17 +230,25 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="claude-sonnet",
+    model="auto",
     messages=[
-        {"role": "user", "content": "List the tables available in ClickHouse."}
+        {"role": "user", "content": "ClickHouse에 어떤 테이블들이 있어?"}
     ],
 )
 print(response.choices[0].message.content)
 ```
 
-**Checkpoint:** open Langfuse → **Tracing**. The trace should contain both the
-model call and the tool call (arguments, result, latency). No client-side
-tool configuration was needed.
+!!! warning "Ask in Korean"
+    The gateway injects MCP tools only for Hangul-primary messages, because
+    language routing sends those to `claude-sonnet` while English and CJK go to
+    `qwen-7b`, which is not reliable at function calling. The same question in
+    English is answered without any tool call. See
+    [Configuration — Where the tool loop runs](configuration.md#where-the-tool-loop-runs).
+
+**Checkpoint:** open Langfuse → **Tracing**. The trace should contain the
+`routing` span, the model call, and a `tool-result/<name>` span per MCP tool the
+gateway executed (arguments, result, latency). No client-side tool configuration
+was needed.
 
 ## 5. Troubleshooting Phase 2
 

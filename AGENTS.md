@@ -17,8 +17,10 @@ profiles, layers, models, secret names, and deployment targets.
   expected environment mechanism, but output must not reveal them. Use
   `.env.example` and `secrets/credentials.example.yaml` when structure is
   needed.
-- Preserve the `airgapped` invariant: it must not render commercial models or
-  commercial-model fallbacks.
+- There is no `airgapped` profile, and no phase of this stack keeps inference
+  inside the deployment's network. Do not describe one as if it existed. If such
+  a profile is reintroduced, the invariant is that it must not render commercial
+  models or commercial-model fallbacks.
 - Update README and `docs/` when behavior, commands, profiles, phases, or
   architecture change.
 - Do not claim a layer or target is implemented until its deployable artifact

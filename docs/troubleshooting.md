@@ -219,27 +219,49 @@ Phase 1 stack.
     ```
 
 ??? failure "LibreChat cannot reach `mcp-clickhouse` — SSRF protection blocks internal addresses"
+    **Applies only if you wire MCP into LibreChat directly.** This stack does
+    not: the gateway injects the tools and runs the loop, and `librechat.yaml`
+    contains no MCP configuration at all. Recorded because the symptom is easy
+    to hit when reintroducing client-side wiring.
+
     **Symptom:** MCP tools never appear in LibreChat, or tool calls return a
     connection error. LibreChat logs show an SSRF-related rejection.
 
     **Cause:** LibreChat's built-in SSRF protection blocks requests to private
-    or Docker-internal network addresses. The MCP server runs at
-    `http://mcp-clickhouse:9100/sse`, which is an internal hostname and is
-    blocked by default.
+    or Docker-internal network addresses. `http://mcp-clickhouse:9100/sse` is an
+    internal hostname and is blocked by default.
 
-    **Fix:** Add the MCP server hostname to `mcpSettings.allowedAddresses` in
-    `librechat.yaml`:
+    **Fix:** Add the MCP server hostname to `mcpSettings.allowedAddresses`.
+    `librechat.yaml` is generated, so the change belongs in the renderer in
+    `scripts/stack.sh`, not in the file:
 
-    ```yaml title="docker/librechat.yaml"
+    ```yaml title="docker/librechat.yaml (generated — edit the renderer)"
     mcpSettings:
       allowedAddresses:
-        - "mcp-clickhouse"
+        - "mcp-clickhouse:9100"
     ```
 
     Recreate the LibreChat container to pick up the change:
 
     ```bash
     docker compose up -d --no-deps librechat
+    ```
+
+??? failure "A Korean question triggers a ClickHouse tool call but the same question in English does not"
+    **Not a bug.** `UnifiedRouter` injects MCP tools only when the last user
+    message is Hangul-primary. Those requests route to `claude-sonnet`, which is
+    reliable at function calling; English and CJK route to `qwen-7b`, which is
+    not, so it is never handed tool schemas.
+
+    The gate is in `docker/litellm_callbacks.py` — the `_pre_script == "hangul"`
+    condition in `async_pre_call_hook`. Widening it means either serving a
+    tool-capable self-hosted model or routing tool-shaped requests to
+    `claude-sonnet` regardless of language.
+
+    Confirm which branch ran from the gateway log:
+
+    ```bash
+    docker compose logs litellm | grep -E 'mcp_inject|routing'
     ```
 
 ??? failure "Tool calls fail — ClickHouse connection refused or authentication error"

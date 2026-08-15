@@ -16,7 +16,7 @@ declarative stack definition.
 </p>
 
 <p class="hero-stack">
-LiteLLM · LibreChat · Langfuse · ClickHouse · OpenAI · Anthropic · Cloudflare · MinIO
+LiteLLM · LibreChat · Langfuse · ClickHouse · Anthropic · RunPod · Cloudflare · MinIO
 </p>
 
 [Get started](getting-started.md){ .md-button .md-button--primary }
@@ -91,7 +91,7 @@ That is what the layers add up to:
 | Layer | What it contributes to the platform |
 |---|---|
 | Gateway | where models are reached and policy is enforced |
-| Serving | models running inside the boundary, so the loop can run on private data |
+| Serving | models running on infrastructure you choose |
 | Tools | what an agent is permitted to do |
 | Observability | what it actually did |
 | Evaluation | whether that was any good |
@@ -104,19 +104,17 @@ that does not exist. Closing the loop also needs one point that both
 there is no loop. That is the gateway, which is why it is the first thing built
 rather than the last.
 
-Agents arrive in <span class="phase phase-2">Phase 2</span> and
-<span class="phase phase-5">Phase 5</span>; the loop that makes them measurable
-is [Phase 5.5](phases.md#55-closing-the-loop-judge-scored-routing). What runs
-today is the gateway and the trace pipeline underneath all of it.
+Tool use arrives in <span class="phase phase-2">Phase 2</span>; full agents and
+the loop that makes them measurable are
+[next steps](phases.md#judge-scored-routing) over the three phases that run
+today. The scores already exist — nothing routes on them yet.
 
 ---
 
 ## The full picture
 
-This is the architecture the stack is being built toward, with the phase that
-delivers each path. The phases are a build order, not a menu — every layer shown
-here is in scope. Today only the <span class="phase phase-1">Phase 1</span>
-paths run.
+The architecture, with the phase that delivers each path. All three phases run
+on the `aws-ec2` target today.
 
 ```mermaid
 flowchart TB
@@ -126,34 +124,33 @@ flowchart TB
     LC["<b>LibreChat</b><br/><small>:3080 · UI</small>"]
     GW["<b>LiteLLM Gateway</b><br/><small>:4000</small><br/><small>routing · virtual keys · cost tracking</small>"]
 
-    OA["OpenAI API"]
-    AN["Anthropic API"]
+    AN["Anthropic API<br/><small>claude-sonnet</small>"]
+    OA["OpenAI API<br/><small>optional</small>"]
     CF["Cloudflare Workers AI<br/><small>FLUX.1-schnell</small>"]
     IMGMI[("MinIO<br/><small>generated images<br/>media.&lt;domain&gt;</small>")]
-    MCP["MCP servers<br/><small>ClickHouse Cloud</small>"]
-    CPU["llama.cpp :8080<br/><small>Qwen2.5-0.5B · CPU</small>"]
-    VL["vLLM :8000<br/><small>Qwen2.5-7B on RunPod</small>"]
+    MCP["MCP server<br/><small>ClickHouse Cloud</small>"]
+    VL["vLLM on RunPod<br/><small>Qwen2.5-7B · serverless</small>"]
 
-    LF["<b>Langfuse</b><br/><small>:3000 · traces · sessions<br/>datasets · evals</small>"]
+    LF["<b>Langfuse</b><br/><small>:3000 · traces · sessions<br/>datasets · scores</small>"]
     CH[("ClickHouse Cloud<br/><small>OLAP traces · llmops db</small>")]
     PG[("Postgres")]
     RD[("Redis")]
     MI[("MinIO")]
-    ST[("MinIO AIStor<br/><small>datasets · artifacts<br/>weights · KV cache</small>")]
+    FB["feedback sidecar<br/><small>ratings → scores</small>"]
 
     U1 --> LC --> GW
     U2 --> GW
 
+    GW -->|"Phase 1 · Korean"| AN
     GW -->|Phase 1| OA
-    GW -->|Phase 1| AN
-    GW -->|"Phase 1 (images)"| CF
+    GW -->|"Phase 1 · images"| CF
     CF --> IMGMI
     GW -->|Phase 2| MCP
-    GW -->|Phase 3| CPU
-    CPU -.->|"Phase 3 (KV cache)"| ST
-    GW -->|Phase 4| VL
+    GW -->|"Phase 3 · English/CJK"| VL
 
-    GW -.->|"traces: prompt, tokens,<br/>latency, cost, errors"| LF
+    GW -.->|"traces: prompt, tokens,<br/>latency, cost, errors, scores"| LF
+    GW --- FB
+    FB -.-> LF
     LF --- CH
     LF --- PG
     LF --- RD
@@ -162,20 +159,16 @@ flowchart TB
     classDef p1 fill:#1a7f37,stroke:#1a7f37,color:#fff
     classDef p2 fill:#8250df,stroke:#8250df,color:#fff
     classDef p3 fill:#bf8700,stroke:#bf8700,color:#fff
-    classDef p4 fill:#2563c9,stroke:#2563c9,color:#fff
     classDef obs fill:#0969da,stroke:#0969da,color:#fff
-    class OA,AN,CF,IMGMI p1
+    class AN,OA,CF,IMGMI p1
     class MCP p2
-    class CPU,ST p3
-    class VL p4
+    class VL p3
     class LF obs
 ```
 
-The two MinIO instances are deliberate. Langfuse runs one for its own blobs;
-the image-hosting MinIO is a separate bucket served via `media.<domain>` so
-generated images are accessible over HTTPS without coupling to Langfuse's
-internal storage. AIStor (Phase 3) adds a third store for dataset and artifact
-lifecycle that you own end to end.
+The two MinIO instances are deliberate. Langfuse runs one for its own blobs; the
+image-hosting bucket is served via `media.<domain>` so generated images are
+reachable over HTTPS without coupling to Langfuse's internal storage.
 
 ### The layers
 
@@ -184,17 +177,13 @@ lifecycle that you own end to end.
 | UI | LibreChat | <span class="phase phase-1">1</span> |
 | Observability | Langfuse (ClickHouse Cloud · Postgres · Redis · MinIO) | <span class="phase phase-1">1</span> |
 | Gateway | LiteLLM — routing, virtual keys, cost tracking | <span class="phase phase-1">1</span> |
-| Models | OpenAI · Anthropic | <span class="phase phase-1">1</span> |
+| Models (commercial) | Anthropic `claude-sonnet`, optionally OpenAI | <span class="phase phase-1">1</span> |
 | Image generation | Cloudflare Workers AI (FLUX.1-schnell) → MinIO (`media.<domain>`) | <span class="phase phase-1">1</span> |
-| Tools | MCP servers — ClickHouse Cloud, wired into LiteLLM gateway | <span class="phase phase-2">2</span> |
-| Serving (CPU) | llama.cpp — quantized model on EC2 CPU | <span class="phase phase-3">3</span> |
-| Models | Self-hosted — Qwen 0.5B (CPU) | <span class="phase phase-3">3</span> |
-| Storage | MinIO AIStor — datasets, artifacts, weights, KV cache | <span class="phase phase-3">3</span> |
-| KV cache | LMCache — prefill a long shared prefix once, reuse it | <span class="phase phase-3">3</span> |
-| Serving (GPU) | vLLM on RunPod | <span class="phase phase-4">4</span> |
-| Models | Self-hosted — Qwen 7B, EXAONE, EEVE | <span class="phase phase-4">4</span> |
-| Compute | RunPod GPU | <span class="phase phase-4">4</span> |
-| *(recipes)* | Context routing · LibreChat Agents · Langfuse evals — no new layer | <span class="phase phase-5">5</span> |
+| Evaluation | Five automated scores per trace + feedback sidecar | <span class="phase phase-1">1</span> |
+| Tools | MCP servers — ClickHouse Cloud, wired into the LiteLLM gateway | <span class="phase phase-2">2</span> |
+| Serving (GPU) | vLLM on RunPod Serverless | <span class="phase phase-3">3</span> |
+| Models (self-hosted) | Qwen2.5-7B-Instruct — EXAONE and EEVE as alternatives | <span class="phase phase-3">3</span> |
+| Routing on scores | Judge scores feeding back into routing — no new layer | [next step](phases.md#next-steps) |
 
 The layer list is the invariant. Which implementation fills a row is a
 configuration decision in `stack.yaml`, which is why the phases can add rows
@@ -202,71 +191,84 @@ without rewriting the ones already there.
 
 ### A single request, end to end
 
-1. A user sends a message in LibreChat (or any OpenAI-compatible client) and
-   picks a model — `claude-sonnet`, `qwen-7b` (RunPod Serverless / Phase 4 GPU), or `qwen-0.5b` (Phase 3 CPU).
-   Selecting `auto` activates language-aware routing at the gateway.
+1. A user sends a message in LibreChat (or any OpenAI-compatible client). The
+   picker offers one model, `auto`, which activates language-aware routing at
+   the gateway. `claude-sonnet` and `qwen-7b` can still be requested by name to
+   bypass routing.
 2. LiteLLM receives it on **one unified endpoint**, resolves the model alias,
-   and routes it to the right provider. Anthropic's format translation is
-   handled for you.
+   and routes it: Korean → `claude-sonnet` (Anthropic), English/CJK →
+   `qwen-7b` (vLLM on RunPod). Anthropic's format translation is handled for you.
 3. If the message contains image-generation intent (e.g. "draw", "그려줘"),
    a pre-call hook intercepts the request, fires off image generation to
    **Cloudflare Workers AI** (FLUX.1-schnell) in the background, and streams
    back the finished image as a markdown tag once it's uploaded to **MinIO**
    (`media.<domain>`). The chat UI renders it inline — no separate DALL-E UI
    needed.
-4. For plain chat requests, the response streams back from the chosen provider.
-5. LiteLLM's callbacks push the full trace — prompt, completion, latency,
-   token counts, computed cost — into **Langfuse**, where ClickHouse stores
-   and serves high-volume trace analytics.
-6. In Langfuse you compare models side by side, build datasets from production
-   traces, and score outputs.
+4. If the message is Korean, the gateway also injects the **ClickHouse Cloud MCP
+   tools** and runs the tool loop itself, so a client that knows nothing about
+   MCP still receives a plain text answer built from query results.
+5. For plain chat requests, the response streams back from the chosen provider.
+6. LiteLLM's callback pushes the full trace — prompt, completion, latency,
+   token counts, computed cost, routing decision, tool results — into
+   **Langfuse**, where ClickHouse Cloud stores and serves trace analytics.
+7. Five scores are attached automatically, and user ratings from LibreChat land
+   on the same trace via the feedback sidecar.
 
 !!! tip "Zero application code changes"
     Observability lives at the **gateway** layer, not in your app. Raw SDKs,
-    LangChain, LlamaIndex, and future MCP-based agents are all traced
-    identically — nothing to instrument.
+    LangChain, LlamaIndex, and MCP-based agents are all traced identically —
+    nothing to instrument.
 
 ---
 
 ## What runs today
 
-Phase 1 is the subset of the diagram above that is running code:
-
 ```mermaid
 flowchart LR
     C["LibreChat / applications"]
     G["LiteLLM Gateway"]
-    O["OpenAI"]
-    A["Anthropic"]
+    A["Anthropic<br/><small>claude-sonnet</small>"]
+    V["vLLM on RunPod<br/><small>qwen-7b</small>"]
     CF["Cloudflare Workers AI"]
     IMGMI[("MinIO (images)")]
+    M["mcp-clickhouse"]
+    CHC[("ClickHouse Cloud")]
     L["Langfuse"]
-    CH[("ClickHouse Cloud<br/><small>llmops db</small>")]
     D["Postgres · Redis · MinIO"]
 
     C --> G
-    G --> O
-    G --> A
+    G --"Korean"--> A
+    G --"English / CJK"--> V
     G --"image callback"--> CF --> IMGMI
+    G --"MCP / SSE"--> M --> CHC
     G -. traces .-> L
-    L --- CH
+    L --- CHC
     L --- D
 ```
 
 - LiteLLM provides one OpenAI-compatible gateway with language-aware routing.
-- LibreChat provides the model picker and chat UI.
-- OpenAI and Anthropic provide model inference.
+- LibreChat provides the chat UI; the picker shows only `auto`.
+- Anthropic serves Korean traffic; `qwen-7b` on RunPod Serverless serves
+  English and CJK traffic, falling back to `claude-sonnet` when the endpoint is
+  cold or stopped.
+- ClickHouse Cloud is reached as an MCP server, injected at the gateway for
+  Korean-language requests.
 - Cloudflare Workers AI (FLUX.1-schnell) generates images on demand; results
   are uploaded to MinIO and served via `media.<domain>`.
-- Langfuse records traces, sessions, tokens, latency, cost, failures, and five automated scores per completion.
-- A feedback sidecar correlates LibreChat user ratings to Langfuse trace IDs via content hash.
-- **ClickHouse Cloud** (`llmops` database) stores trace analytics. Postgres, Redis, and MinIO run locally for Langfuse's application data.
+- Langfuse records traces, sessions, tokens, latency, cost, failures, and five
+  automated scores per completion.
+- A feedback sidecar correlates LibreChat user ratings to Langfuse trace IDs via
+  content hash.
+- **ClickHouse Cloud** (`llmops` database) stores trace analytics. Postgres,
+  Redis, and MinIO run locally for Langfuse's application data.
 
-!!! warning "Phase 1 is not an air-gapped deployment"
-    At least one external model-provider key is required, and every model
-    request leaves the local network. Sovereignty is the argument the
-    architecture makes; it becomes demonstrable in Phase 3, when the CPU-served
-    `qwen-0.5b` enables `--profile airgapped` with no commercial API. See
+!!! warning "This is not an air-gapped deployment"
+    Commercial provider keys are required, and the Phase 3 GPU worker runs on
+    RunPod — outside the deployment's own network. Sovereignty is the argument
+    the architecture makes: one gateway where the model choice, the policy, and
+    the trace all live, so moving inference inside a boundary is a
+    configuration change rather than a migration. Making that boundary a control
+    would mean serving a model inside it, which nothing here provisions. See
     [Background](background.md#the-cross-border-question) for why the transfer
     question is the one that decides it.
 
@@ -276,16 +278,15 @@ flowchart LR
 
 | Phase | Outcome | Target | Status |
 |:--:|---|---|---|
-| <span class="phase phase-1">1</span> | Gateway, UI, and tracing over frontier APIs | Docker or EC2 | Running (EC2) |
-| <span class="phase phase-2">2</span> | MCP tool layer, starting with ClickHouse Cloud | EC2 | Runnable — ClickHouse Cloud via MCP |
-| <span class="phase phase-3">3</span> | CPU serving (llama.cpp) and MinIO KV cache | EC2 | Not built yet |
-| <span class="phase phase-4">4</span> | GPU serving on RunPod | EC2 + RunPod | Not built yet |
-| <span class="phase phase-5">5</span> | Routing, agents, guardrails, and judge-scored routing | EC2 | Not built yet |
+| <span class="phase phase-1">1</span> | Gateway, UI, tracing, and scoring over frontier APIs | Docker or EC2 | Running |
+| <span class="phase phase-2">2</span> | MCP tool layer — ClickHouse Cloud | EC2 | Running |
+| <span class="phase phase-3">3</span> | GPU serving on RunPod (`qwen-7b`) | EC2 + RunPod | Running |
+| — | [Next steps](phases.md#next-steps): context routing, agents, evals, guardrails, judge-scored routing | EC2 | Not built |
 
 The Status column reports implementation state, not scope. Phase 1 runs on
-local Docker or EC2. Phase 2 and above require `--target aws-ec2`. See
-[Build-out phases](phases.md) for the end state and acceptance criteria of each
-phase.
+local Docker or EC2. Phase 2 and above require `--target aws-ec2`. The next
+steps add no layer, which is why they carry no phase number. See
+[Build-out phases](phases.md) for the end state and acceptance criteria.
 
 ---
 
