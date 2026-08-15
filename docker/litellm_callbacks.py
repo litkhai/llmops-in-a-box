@@ -206,6 +206,12 @@ _IMAGE_RE = re.compile(
 # ── in-flight image tasks: call_id → asyncio.Task[str] ───────────────────────
 _image_tasks: Dict[str, "asyncio.Task[str]"] = {}
 
+# ── MCP-injected call tracking (call_id set) ──────────────────────────────────
+# Metadata written in async_pre_call_hook is not guaranteed to propagate to
+# async_post_call_streaming_iterator_hook.  Use a global set keyed by call_id
+# (same pattern as _image_tasks) so the streaming hook can detect MCP calls.
+_mcp_injected_calls: set = set()
+
 # ── language heuristic ────────────────────────────────────────────────────────
 _SCRIPT_THRESHOLD = 0.15
 
@@ -638,6 +644,7 @@ class UnifiedRouter(litellm.CustomLogger):
                 data["tools"] = mcp_tools
                 data["tool_choice"] = "auto"
                 data.setdefault("metadata", {})["mcp_tools_injected"] = True
+                _mcp_injected_calls.add(str(data.get("litellm_call_id") or id(data)))
                 # Prepend a system message so the model knows to use tools for data questions.
                 messages = data.get("messages") or []
                 if not any(m.get("role") == "system" for m in messages):
@@ -838,7 +845,11 @@ class UnifiedRouter(litellm.CustomLogger):
         # Buffer the entire stream so we can detect tool_calls before anything
         # reaches the client.  If the model picks a tool we execute it and
         # stream only the final plain-text follow-up response.
-        if _MCP_ENABLED and meta.get("mcp_tools_injected") and not meta.get("is_tool_followup"):
+        # Use _mcp_injected_calls (call_id set) rather than metadata because
+        # metadata written in async_pre_call_hook is not reliably propagated
+        # to this hook's request_data.
+        if _MCP_ENABLED and call_id in _mcp_injected_calls and not meta.get("is_tool_followup"):
+            _mcp_injected_calls.discard(call_id)
             chunks = []
             async for chunk in response:
                 chunks.append(chunk)
