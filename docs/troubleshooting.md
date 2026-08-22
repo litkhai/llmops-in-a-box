@@ -81,6 +81,40 @@ Phase 1 stack.
     Do not restart repeatedly before DNS has propagated; Let's Encrypt rate-limits
     failed certificate requests.
 
+??? failure "`status --target aws-ec2` reports every service down, or a direct port times out"
+    **Symptom:** `./scripts/stack.sh status --target aws-ec2` shows `000` for
+    litellm, langfuse, librechat, and minio, while the site works fine in a
+    browser. Or `curl http://<ec2-ip>:4000/...` hangs.
+
+    **Cause:** Expected. The security group publishes **80 and 443 only** — the
+    application ports are closed. Everything is served through Caddy's HTTPS
+    subdomains.
+
+    **Fix:** Give the command the domain, so it probes the same route a browser
+    does:
+
+    ```bash
+    ./scripts/stack.sh secrets domain      # persists DOMAIN_BASE to .env
+    # or, one-off:
+    DOMAIN_BASE=example.com ./scripts/stack.sh status --target aws-ec2
+    ```
+
+    `status` warns when `DOMAIN_BASE` is unset on the aws-ec2 target for exactly
+    this reason. To reach a port directly anyway, tunnel over SSH rather than
+    reopening it:
+
+    ```bash
+    ssh -i <key>.pem -L 4000:localhost:4000 ec2-user@<ec2-ip>
+    ```
+
+??? failure "SSH times out on a host that worked yesterday"
+    **Cause:** There is no standing SSH ingress — `ssh_allowed_cidrs` is empty
+    by default, and a rule opened for an earlier session was closed (or your
+    address changed).
+
+    **Fix:** Open it for this session, then close it. See
+    [Deployment — SSH access](deployment.md#ssh-access).
+
 ---
 
 ## LiteLLM callback configuration

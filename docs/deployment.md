@@ -6,11 +6,11 @@ with [Getting started](getting-started.md).
 
 ## Target scope
 
-| Target | Phases | Lifecycle | Status |
-|---|---|---|---|
-| `docker` | 1 only | Docker Compose | **Runnable** |
-| `aws-ec2` | 1 – 3 | Terraform → EC2 → Compose | **Running** (`--profile phase-3`) |
-| `k8s` | — | Helm | Planned and disabled |
+| Target | Phases | Lifecycle | Inbound | Status |
+|---|---|---|---|---|
+| `docker` | 1 only | Docker Compose | localhost ports | **Runnable** |
+| `aws-ec2` | 1 – 3 | Terraform → EC2 → Compose | 80/443 only | **Running** (`--profile phase-3`) |
+| `k8s` | — | Helm | — | Planned and disabled |
 
 `docker` is the right choice for iterating on Phase 1 without needing an AWS
 account. `aws-ec2` is the primary target for demos and all phases beyond Phase 1.
@@ -77,9 +77,10 @@ The primary deployment target from Phase 2 onwards, and where all three phases
 run today. A single EC2 instance running the same Docker Compose stack. Region:
 `ap-northeast-2`. Instance: `t3.xlarge`, 100 GiB gp3.
 
-Services are accessible via direct port (3000, 3080, 4000) or, when a domain
-is configured, via HTTPS subdomains (`chat.<domain>`, `langfuse.<domain>`,
-`litellm.<domain>`).
+Services are accessible over HTTPS subdomains only (`chat.<domain>`,
+`langfuse.<domain>`, `litellm.<domain>`, `media.<domain>`). The security group
+publishes 80 and 443 and nothing else — configuring a domain is therefore part
+of provisioning, not an optional extra.
 
 ### Prerequisites
 
@@ -112,9 +113,10 @@ aws ssm get-parameters-by-path \
   --query 'Parameters[*].Name'
 ```
 
-### 2. (Optional) Configure a custom domain
+### 2. Configure a domain
 
-Skip this step for plain HTTP access via direct ports.
+Not optional: without it there is no published route to any service, because
+the direct ports are closed.
 
 **a. Add DNS records.** In your DNS provider, create `A` records pointing each
 subdomain at the EC2 instance's public IP:
@@ -156,6 +158,9 @@ indefinitely.
 ./scripts/stack.sh up --target aws-ec2 \
     --tf-var key_name=<your-key-pair-name>
 ```
+
+Add `--tf-var 'ssh_allowed_cidrs=["<your-ip>/32"]'` if you want SSH open from
+the start; otherwise port 22 stays closed and you open it per session (below).
 
 This runs `terraform apply`, then waits up to 5 minutes for the bootstrap
 script to complete. The bootstrap script:
@@ -261,15 +266,64 @@ production service.
 
 ### Published ports (EC2)
 
-| Service | Direct port | HTTPS subdomain (if domain configured) |
-|---|---|---|
-| LibreChat | `3080` | `chat.<domain>` |
-| Langfuse | `3000` | `langfuse.<domain>` |
-| LiteLLM | `4000` | `litellm.<domain>` |
-| MinIO (images) | `9002` | `media.<domain>` |
+The security group opens **two ports, and only two**:
 
-Ports 80 and 443 are open to `0.0.0.0/0` for HTTPS. The remaining ports use
-`allowed_cidr` (default `0.0.0.0/0`; each service has its own authentication).
+| Port | CIDR | Purpose |
+|---|---|---|
+| `80` | `0.0.0.0/0` | HTTP — Caddy redirects to HTTPS |
+| `443` | `0.0.0.0/0` | HTTPS — Caddy terminates TLS for every service |
+
+Every service is reached through its subdomain, not through a port:
+
+| Service | URL | Container port (internal) |
+|---|---|---|
+| LibreChat | `https://chat.<domain>` | 3080 |
+| Langfuse | `https://langfuse.<domain>` | 3000 |
+| LiteLLM | `https://litellm.<domain>` | 4000 |
+| MinIO (images) | `https://media.<domain>` | 9000 |
+| `mcp-clickhouse` | — | 9100, no public route |
+
+The application ports are deliberately not published. They served plain HTTP,
+and `4000` fronts the gateway's admin API — there is no reason to expose either
+when Caddy already terminates TLS for the same services. `status`, `urls`, and
+`smoke-test` follow the HTTPS route whenever `DOMAIN_BASE` is set.
+
+!!! warning "Without a domain there is no way in"
+    The subdomains are the only inbound path. If `DOMAIN_BASE` is not
+    configured, provision with `--tf-var 'ssh_allowed_cidrs=["<your-ip>/32"]'`
+    and reach the services over an SSH tunnel, or add the port rules back
+    deliberately.
+
+### SSH access
+
+There is **no SSH ingress by default** — `ssh_allowed_cidrs` is an empty list,
+and Terraform rejects `0.0.0.0/0` for it. Application traffic never needs port
+22. Open it for the session that needs it:
+
+```bash
+MYIP=$(curl -s https://checkip.amazonaws.com)
+SG=$(cd terraform && terraform output -raw security_group_id 2>/dev/null || echo "<sg-id>")
+
+aws ec2 authorize-security-group-ingress --group-id "$SG" --region ap-northeast-2 \
+  --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$MYIP/32,Description=temp}]"
+
+# ... work ...
+
+aws ec2 revoke-security-group-ingress --group-id "$SG" --region ap-northeast-2 \
+  --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$MYIP/32}]"
+```
+
+Or declare it for a provisioning run:
+`--tf-var 'ssh_allowed_cidrs=["1.2.3.4/32"]'`.
+
+!!! danger "Never edit the security group's `description`"
+    AWS treats it as immutable, so Terraform can only change it by **replacing
+    the security group — and with it the instance**, destroying the root volume
+    that holds Langfuse, MongoDB, and MinIO data. Put explanations in comments
+    instead. For the same reason `aws_instance.stack` carries
+    `lifecycle { ignore_changes = [ami] }`: the AMI data source is
+    `most_recent`, so without it an unrelated `apply` would replace the
+    instance the next time Amazon publishes an AL2023 image.
 
 ## Phase 2 — MCP tool layer
 
@@ -350,13 +404,19 @@ GPU endpoint can be used by anyone.
 
 ## Client endpoint
 
-Every model is called through LiteLLM:
+Every model is called through LiteLLM. The base URL is the only thing that
+differs between targets:
+
+| Target | `base_url` |
+|---|---|
+| `docker` | `http://localhost:4000` |
+| `aws-ec2` | `https://litellm.<domain>` |
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:4000",
+    base_url="https://litellm.example.com",   # or http://localhost:4000
     api_key="<LITELLM_MASTER_KEY>",
 )
 

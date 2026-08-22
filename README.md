@@ -139,6 +139,11 @@ Phase 1 runs locally with `--target docker` or on `--target aws-ec2`. Phase 2
 and above require EC2: ClickHouse Cloud MCP needs reliable outbound access, and
 RunPod is an external service regardless of where the gateway lives.
 
+On EC2 the security group publishes **80 and 443 only** — every service is
+reached through its HTTPS subdomain via Caddy, and SSH is opt-in rather than
+standing. The local `docker` target is unchanged and still binds the ports
+above.
+
 See [Build-out phases](https://litkhai.github.io/llmops-in-a-box/phases/) for
 the end state, the acceptance criteria of each phase, and why the order is what
 it is.

@@ -255,7 +255,7 @@ Copilot can access them.
 - `LITELLM_MASTER_KEY` fronts downstream provider access and spend; protect it
   accordingly.
 - Set a `VLLM_API_KEY` before exposing a RunPod proxy.
-- The `allowed_cidr` for the AWS EC2 target defaults to `0.0.0.0/0`; each service has its own application-level authentication. Restrict it further if you want network-level access control in addition.
+- The AWS EC2 security group publishes only 80 and 443. SSH is opt-in through `ssh_allowed_cidrs` (empty by default, and `0.0.0.0/0` is rejected); open it for a session and close it after.
 - Changing `.env` does not rotate accounts already persisted by databases or
   object stores.
 - Preserve `LANGFUSE_ENCRYPTION_KEY`; losing it can make stored encrypted data

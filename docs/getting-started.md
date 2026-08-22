@@ -111,12 +111,19 @@ EC2 key pair in `ap-northeast-2`.
 # Set Phase 2 credentials
 ./scripts/stack.sh secrets setup --phase 2
 
+# A domain is required on EC2 — the security group publishes 80/443 only
+./scripts/stack.sh secrets domain
+
 # Push all credentials to SSM
 ./scripts/stack.sh secrets push --target aws-ec2
 
 # Provision and start on EC2
 ./scripts/stack.sh up --target aws-ec2 --tf-var key_name=<your-key-pair>
 ```
+
+On EC2 the services live at `https://chat.<domain>`, `https://langfuse.<domain>`,
+and `https://litellm.<domain>` — not at `<ip>:<port>`. SSH is closed by default;
+open it per session when you need it.
 
 See [Deployment — AWS EC2](deployment.md#aws-ec2) for the full guide, including
 optional HTTPS setup with a custom domain.

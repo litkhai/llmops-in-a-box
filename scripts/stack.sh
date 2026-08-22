@@ -215,6 +215,38 @@ target_host() {
   printf '%s' "${h:-localhost}"
 }
 
+# ── domain-aware endpoint resolution ─────────────────────────────────────────
+#
+#  With a domain configured, the aws-ec2 target publishes only 80 and 443 and
+#  Caddy terminates TLS for every service. host:port is then unreachable from
+#  outside, so `status`, `urls`, and `smoke-test` have to follow the same route
+#  a user's browser does. Without a domain — or on the docker target — nothing
+#  changes and the direct port is still the answer.
+
+domain_base() {
+  [ "$TARGET" = "aws-ec2" ] || return 0
+  printf '%s' "${DOMAIN_BASE:-$(qs ".targets.\"aws-ec2\".domain.base" 2>/dev/null || true)}"
+}
+
+# subdomain_for <key> [default] — the prefix declared in stack.yaml, or a default.
+subdomain_for() {
+  local v
+  v="$(qs ".targets.\"aws-ec2\".domain.subdomains.$1" 2>/dev/null || true)"
+  printf '%s' "${v:-${2:-}}"
+}
+
+# service_url <subdomain> <port> — https://<sub>.<domain> when both are known,
+# otherwise http://<host>:<port>. An empty subdomain always means host:port.
+service_url() {
+  local sub="$1" port="$2" base
+  base="$(domain_base)"
+  if [ -n "$base" ] && [ -n "$sub" ]; then
+    printf 'https://%s.%s' "$sub" "$base"
+  else
+    printf 'http://%s:%s' "$(target_host)" "$port"
+  fi
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  render — model catalog -> litellm_config.yaml + librechat.yaml
 # ═════════════════════════════════════════════════════════════════════════════
@@ -454,12 +486,9 @@ render_caddy() {
   [ -n "$base" ] || return 0
 
   email="${DOMAIN_SSL_EMAIL:-$(qs ".targets.\"aws-ec2\".domain.ssl_email" 2>/dev/null || true)}"
-  sub_litellm="$(qs ".targets.\"aws-ec2\".domain.subdomains.litellm")"
-  sub_langfuse="$(qs ".targets.\"aws-ec2\".domain.subdomains.langfuse")"
-  sub_librechat="$(qs ".targets.\"aws-ec2\".domain.subdomains.librechat")"
-  [ -n "$sub_litellm" ]  || sub_litellm="litellm"
-  [ -n "$sub_langfuse" ] || sub_langfuse="langfuse"
-  [ -n "$sub_librechat" ] || sub_librechat="chat"
+  sub_litellm="$(subdomain_for litellm litellm)"
+  sub_langfuse="$(subdomain_for langfuse langfuse)"
+  sub_librechat="$(subdomain_for librechat chat)"
 
   out="$REPO_ROOT/$(qs '.render.files.caddy')"
   mkdir -p "$(dirname "$out")"
@@ -471,8 +500,7 @@ render_caddy() {
       printf '{\n    email %s\n}\n\n' "$email"
     fi
     local sub_media
-    sub_media="$(qs ".targets.\"aws-ec2\".domain.subdomains.media" 2>/dev/null || true)"
-    [ -n "$sub_media" ] || sub_media="media"
+    sub_media="$(subdomain_for media media)"
 
     printf '%s.%s {\n    reverse_proxy librechat:3080\n    encode gzip\n}\n\n' \
       "$sub_librechat" "$base"
@@ -2102,18 +2130,28 @@ cmd_down() {
 }
 
 cmd_urls() {
-  resolve_defaults
-  local host l port
-  host="$(target_host)"
+  resolve_defaults; load_env
+  local l port impl sub base
+  base="$(domain_base)"
   say "${C_B}endpoints${C_RST}"
   while IFS= read -r l; do
     [ -n "$l" ] || continue
     port="$(qs ".layers.\"$l\".port")"
     [ -n "$port" ] || continue
-    if [ "$(qs ".layers.\"$l\".managed_by")" = "compose" ]; then
-      printf '  %-14s http://%s:%s\n' "$(qs ".layers.\"$l\".impl")" "$host" "$port"
+    [ "$(qs ".layers.\"$l\".managed_by")" = "compose" ] || continue
+    # The layer's impl name doubles as the subdomain key: litellm, langfuse,
+    # librechat. A layer with no declared subdomain (mcp) has no public route.
+    impl="$(qs ".layers.\"$l\".impl")"
+    sub="$(subdomain_for "$impl")"
+    if [ -n "$base" ] && [ -z "$sub" ]; then
+      printf '  %-14s %s (internal only — no public route)\n' "$impl" "$(service_url "" "$port")"
+    else
+      printf '  %-14s %s\n' "$impl" "$(service_url "$sub" "$port")"
     fi
   done < <(resolved_layers)
+  if [ -n "$base" ]; then
+    printf '  %-14s %s\n' "minio" "$(service_url "$(subdomain_for media media)" 9002)"
+  fi
 }
 
 # Substitute {{host}} and {{ENV_VAR}} placeholders in a health-check URL.
@@ -2135,11 +2173,22 @@ expand_url() {
 
 cmd_status() {
   resolve_defaults; load_env
-  local host to n lyr url code active
+  local host to n lyr url code active base sub path internal
   host="$(target_host)"
   to="$(qs '.health.timeout_s')"
   active=" $(resolved_layers | tr '\n' ' ') "
-  info "Health  ${C_DIM}host=$host${C_RST}"
+  base="$(domain_base)"
+  if [ -n "$base" ]; then
+    info "Health  ${C_DIM}domain=$base  (direct ports are not published)${C_RST}"
+  else
+    info "Health  ${C_DIM}host=$host${C_RST}"
+    # Without a domain there is nothing to check but the direct ports, and the
+    # EC2 security group does not publish them. Say so once, rather than
+    # printing four timeouts that look like an outage.
+    if [ "$TARGET" = "aws-ec2" ]; then
+      warn "DOMAIN_BASE is unset — falling back to direct ports, which the security group does not open. Run './scripts/stack.sh secrets domain' or export DOMAIN_BASE."
+    fi
+  fi
 
   local i count
   count="$(q '.health.checks | length')"
@@ -2148,9 +2197,22 @@ cmd_status() {
     n="$(qs ".health.checks[$i].name")"
     lyr="$(qs ".health.checks[$i].layer")"
     url="$(qs ".health.checks[$i].url")"
+    sub="$(qs ".health.checks[$i].subdomain")"
+    path="$(qs ".health.checks[$i].path")"
+    internal="$(qs ".health.checks[$i].internal")"
     i=$((i + 1))
     case "$active" in *" $lyr "*) : ;; *) continue ;; esac
-    url="$(expand_url "$url" "$host")"
+    # Some services are reachable only inside the compose network. Checking them
+    # from a laptop would always fail, which is noise rather than a signal.
+    if [ "$internal" = "true" ] && [ "$host" != "localhost" ]; then
+      say "  ${C_DIM}·${C_RST} $(printf '%-12s' "$n") ${C_DIM}internal only — check from the instance${C_RST}"
+      continue
+    fi
+    if [ -n "$base" ] && [ -n "$sub" ]; then
+      url="https://$(subdomain_for "$sub" "$sub").${base}${path}"
+    else
+      url="$(expand_url "$url" "$host")"
+    fi
     case "$url" in
       *'{{'*|'/'*|'') warn "$(printf '%-12s' "$n") endpoint unknown (unresolved placeholder)"; continue ;;
     esac
@@ -2172,16 +2234,21 @@ cmd_logs() {
 
 cmd_smoke_test() {
   resolve_defaults; load_env
-  local host fail=0 code model tmp
+  local host fail=0 code model tmp litellm_url langfuse_url
   host="$(target_host)"
   model="$(resolved_models | head -1)"
   [ -n "$model" ] || die "no models resolved for profile=$PROFILE"
 
-  info "Smoke test  ${C_DIM}host=$host  model=$model${C_RST}"
+  # Same resolution as `status`: the HTTPS route when a domain is configured,
+  # the direct port otherwise.
+  litellm_url="$(service_url "$(subdomain_for litellm)" 4000)"
+  langfuse_url="$(service_url "$(subdomain_for langfuse)" 3000)"
+
+  info "Smoke test  ${C_DIM}gateway=$litellm_url  model=$model${C_RST}"
 
   # 1. LiteLLM liveness
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-    "http://$host:4000/health/liveliness" 2>/dev/null || true)"
+    "$litellm_url/health/liveliness" 2>/dev/null || true)"
   case "$code" in
     2*|3*) ok "$(printf '%-18s' litellm) $code" ;;
     *)     bad "$(printf '%-18s' litellm) ${code:-no-response}"; fail=1 ;;
@@ -2189,7 +2256,7 @@ cmd_smoke_test() {
 
   # 2. Langfuse liveness
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-    "http://$host:3000/api/public/health" 2>/dev/null || true)"
+    "$langfuse_url/api/public/health" 2>/dev/null || true)"
   case "$code" in
     2*|3*) ok "$(printf '%-18s' langfuse) $code" ;;
     *)     bad "$(printf '%-18s' langfuse) ${code:-no-response}"; fail=1 ;;
@@ -2199,7 +2266,7 @@ cmd_smoke_test() {
   if [ "$fail" -eq 0 ]; then
     tmp="$(mktemp)"
     code="$(curl -s -o "$tmp" -w '%{http_code}' --max-time 30 \
-      -X POST "http://$host:4000/chat/completions" \
+      -X POST "$litellm_url/chat/completions" \
       -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
       -H "Content-Type: application/json" \
       -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
@@ -2284,7 +2351,7 @@ ${C_B}EXAMPLES${C_RST}
   ./scripts/stack.sh secrets validate --all
   ./scripts/stack.sh doctor --profile phase-1
   ./scripts/stack.sh up --target docker --profile full
-  ./scripts/stack.sh up --target aws-ec2 --tf-var key_name=kp --tf-var allowed_cidr=1.2.3.4/32
+  ./scripts/stack.sh up --target aws-ec2 --tf-var key_name=kp
   ./scripts/stack.sh down --purge
 EOF
 }

@@ -18,7 +18,7 @@ resource "aws_instance" "stack" {
 
   metadata_options {
     http_endpoint               = "enabled"
-    http_tokens                 = "required"   # IMDSv2 only
+    http_tokens                 = "required" # IMDSv2 only
     http_put_response_hop_limit = 1
   }
 
@@ -30,4 +30,13 @@ resource "aws_instance" "stack" {
   volume_tags = merge(local.common_tags, {
     Name = "${var.project_slug}-stack-root"
   })
+
+  lifecycle {
+    # data.aws_ami.al2023 is most_recent, so its id changes whenever Amazon
+    # publishes a new AL2023 image. Without this, an unrelated `apply` — a tag
+    # edit, a new variable — replaces the instance, and the root volume holding
+    # Langfuse, Mongo, and MinIO data goes with it. The AMI only matters on
+    # first boot; to move to a newer one, do it deliberately with -replace.
+    ignore_changes = [ami]
+  }
 }

@@ -193,9 +193,12 @@ targets:
       volume_type: gp3
       region: ap-northeast-2
       ssm_path_prefix: /sais/phase-1
-      # key_name and allowed_cidr have no safe default — pass them explicitly:
-      #   ./scripts/stack.sh up --target aws-ec2 \
-      #       --tf-var key_name=my-keypair --tf-var allowed_cidr=1.2.3.4/32
+      # key_name has no default — pass it explicitly:
+      #   ./scripts/stack.sh up --target aws-ec2 --tf-var key_name=my-keypair
+      #
+      # The security group publishes 80 and 443 only; every service is reached
+      # through the Caddy subdomains below. SSH is opt-in and closed by default:
+      #   --tf-var 'ssh_allowed_cidrs=["1.2.3.4/32"]'
     # Optional: configure a custom domain for automatic HTTPS via Caddy.
     # Values here are overridden by DOMAIN_BASE / DOMAIN_SSL_EMAIL env vars.
     # Run `./scripts/stack.sh secrets domain` to set them interactively.
@@ -540,8 +543,20 @@ render:
     caddy: docker/caddy/Caddyfile
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Health checks — {{host}} is substituted from the resolved target.
-#  Used by `stack.sh status`. Checks for disabled layers are skipped.
+#  Health checks — used by `stack.sh status`. Checks for disabled layers are
+#  skipped.
+#
+#  Two forms per check, and which one is used depends on the target:
+#    url             {{host}} is the resolved target host, {{ENV}} any env var.
+#                    Used for the docker target and for aws-ec2 without a domain.
+#    subdomain+path  Used when the aws-ec2 target has a domain. The EC2 security
+#                    group publishes only 80 and 443, so the direct port is not
+#                    reachable from outside and Caddy's HTTPS route is the only
+#                    honest thing to check. `subdomain` is a key under
+#                    targets.aws-ec2.domain.subdomains.
+#
+#  internal: true marks a service with no public route. It is skipped against a
+#  remote host rather than reported as down.
 # ─────────────────────────────────────────────────────────────────────────────
 health:
   timeout_s: 5
@@ -549,19 +564,28 @@ health:
     - name: litellm
       layer: gateway
       url: http://{{host}}:4000/health/liveliness
+      subdomain: litellm
+      path: /health/liveliness
     - name: langfuse
       layer: observability
       url: http://{{host}}:3000/api/public/health
+      subdomain: langfuse
+      path: /api/public/health
     - name: librechat
       layer: ui
       url: http://{{host}}:3080/health
+      subdomain: librechat
+      path: /health
     # ClickHouse is now ClickHouse Cloud — no local health endpoint to check.
     - name: langfuse-minio
       layer: observability
       url: http://{{host}}:9002/minio/health/live
+      subdomain: media
+      path: /minio/health/live
     - name: mcp
       layer: tools
       url: http://{{host}}:9100/health
+      internal: true
     - name: vllm
       layer: serving
       url: "{{VLLM_API_BASE}}/models"

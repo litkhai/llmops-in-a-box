@@ -499,8 +499,13 @@ Set the required credentials first (see
 
 ## Domain / HTTPS proxy (aws-ec2)
 
-The `aws-ec2` target includes an optional Caddy reverse proxy that provides
-automatic HTTPS via Let's Encrypt — no certificate management required.
+The `aws-ec2` target runs a Caddy reverse proxy that provides automatic HTTPS
+via Let's Encrypt — no certificate management required.
+
+It is not optional in practice: the security group publishes **80 and 443 only**,
+so Caddy's subdomains are the only route to any service. The application ports
+(3000, 3080, 4000, 9002) are closed — they carried plain HTTP, and 4000 fronts
+the gateway's admin API.
 
 ### Configuring a domain
 
@@ -561,6 +566,29 @@ targets:
         librechat: chat
         media: media
 ```
+
+The same map drives three things, so they cannot drift: the rendered Caddyfile,
+the URLs `stack.sh urls` prints, and the endpoints `stack.sh status` and
+`smoke-test` probe.
+
+### How health checks resolve
+
+`stack.yaml` gives each check both forms:
+
+```yaml
+- name: litellm
+  layer: gateway
+  url: http://{{host}}:4000/health/liveliness   # docker, or aws-ec2 with no domain
+  subdomain: litellm                            # aws-ec2 with a domain
+  path: /health/liveliness
+```
+
+With `DOMAIN_BASE` set and `--target aws-ec2`, `status` probes
+`https://litellm.<domain>/health/liveliness`. Without it, it falls back to the
+direct port and warns — on EC2 that port is closed, so every check would
+otherwise report a false outage. A check marked `internal: true`
+(`mcp-clickhouse`) is skipped against a remote host instead of being reported
+as down.
 
 ---
 

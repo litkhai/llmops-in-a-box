@@ -27,10 +27,19 @@ variable "key_name" {
   type        = string
 }
 
-variable "allowed_cidr" {
-  description = "CIDR block allowed inbound. Use 0.0.0.0/0 for open access (each service has its own auth)."
-  type        = string
-  default     = "0.0.0.0/0"
+variable "ssh_allowed_cidrs" {
+  description = <<-EOT
+    CIDRs allowed to reach port 22. Empty by default: no SSH ingress at all.
+    Application traffic does not need it — everything is served over HTTPS by
+    Caddy on 80/443. Open it per session for the address that needs it.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = !contains(var.ssh_allowed_cidrs, "0.0.0.0/0")
+    error_message = "Refusing 0.0.0.0/0 for SSH. Pass the operator's own address, e.g. 1.2.3.4/32."
+  }
 }
 
 variable "project_slug" {
