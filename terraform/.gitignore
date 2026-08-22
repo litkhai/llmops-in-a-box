@@ -3,6 +3,10 @@
 terraform.tfstate
 terraform.tfstate.backup
 *.tfplan
+# `-out=tfplan` is the common spelling and has no extension to match above.
+# A saved plan embeds resource attributes from state, so it must never be
+# committed.
+tfplan
 crash.log
 override.tf
 override.tf.json
