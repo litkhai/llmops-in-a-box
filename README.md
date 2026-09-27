@@ -224,6 +224,13 @@ not be edited directly. Change `stack.yaml`, then run:
 | Fix a known issue | [Troubleshooting](https://litkhai.github.io/llmops-in-a-box/troubleshooting/) |
 | Present the stack | [Demo flow](https://litkhai.github.io/llmops-in-a-box/demo-flow/) |
 
+## Related repositories
+
+| Repository | What it adds |
+|---|---|
+| [langfuse-hols](https://github.com/litkhai/langfuse-hols) | Self-hosting Langfuse on ClickHouse (OSS + Enterprise) and the prompt → dataset → experiment → evaluator quality loop, with results read straight from Langfuse's ClickHouse tables |
+| [lightweight-workshop-llmops-in-a-box](https://github.com/litkhai/lightweight-workshop-llmops-in-a-box) | The self-paced workshop built on this stack |
+
 ## License
 
 MIT
