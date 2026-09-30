@@ -13,7 +13,16 @@
       "Read(./**/id_rsa*)",
       "Read(./**/*credentials*.yaml)",
       "Read(./**/*credentials*.yml)",
-      "Read(./**/*credentials*.json)"
+      "Read(./**/*credentials*.json)",
+      "mcp__claude_ai_Slack",
+      "mcp__claude_ai_Notion",
+      "mcp__claude_ai_Gmail",
+      "mcp__claude_ai_Google_Drive",
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__claude_ai_Atlassian",
+      "mcp__claude_ai_HubSpot",
+      "mcp__claude_ai_Figma",
+      "mcp__claude_ai_Canva"
     ],
     "allow": [
       "Read(./secrets/README.md)",
