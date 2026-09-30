@@ -1,6 +1,7 @@
 # Repository guidance for Codex
 
 > Harness: khai-harness core@4b0e565 · context public · bilingual no
+> Reads: ../khai-harness/standards/delivery/profiles/workshop
 
 ## Project
 
