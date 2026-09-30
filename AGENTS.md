@@ -31,33 +31,8 @@ profiles, layers, models, secret names, and deployment targets.
 - When Codex materially contributes to a commit, append
   `Co-authored-by: Codex <codex@openai.com>` to the commit message.
 
-## Validation
-
-Run the checks relevant to the files changed:
-
-```bash
-bash -n scripts/stack.sh
-yq -e '.' stack.yaml >/dev/null
-./scripts/stack.sh config
-./scripts/stack.sh models
-./scripts/stack.sh secrets audit
-mkdocs build --strict
-```
-
-When model or routing configuration changes, render every affected profile and
-verify that generated LiteLLM and LibreChat model lists agree. When deployment
-artifacts exist, also run their native config validation before reporting the
-work complete.
-
-## Review priorities
-
-Review changes in this order:
-
-1. Secret exposure, unintended egress, authentication, and destructive actions.
-2. Drift between `stack.yaml`, rendered configuration, deployment artifacts,
-   and documentation.
-3. Profile dependency resolution, fallback behavior, and phase readiness.
-4. Health checks, observability metadata, reproducibility, and rollback.
+Before reporting work complete or reviewing a change, read [`MAINTAINING.md`](MAINTAINING.md)
+(validation commands, review order).
 
 <!-- harness:core start — khai-harness core@4b0e565 · context public · 손으로 고치지 마세요 -->
 **Context: public.** Public sources only — nothing from company connectors, internal hosts, internal wikis or
