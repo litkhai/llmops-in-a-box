@@ -205,6 +205,11 @@ targets:
     domain:
       base: ""             # e.g. example.com  (overridden by DOMAIN_BASE)
       ssl_email: ""        # Let's Encrypt contact (overridden by DOMAIN_SSL_EMAIL)
+      # TLS source for the subdomains (overridden by DOMAIN_TLS):
+      #   ""         Let's Encrypt via Caddy, renewed automatically (default)
+      #   origin-ca  a Cloudflare Origin CA certificate in docker/caddy/certs/origin.{pem,key};
+      #              only valid behind the Cloudflare proxy with SSL mode Full (strict) — see docs/deployment.md
+      tls: ""
       subdomains:
         litellm: litellm   # litellm.example.com
         langfuse: langfuse # langfuse.example.com
