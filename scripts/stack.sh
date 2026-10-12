@@ -481,11 +481,23 @@ render_librechat() {
 render_caddy() {
   # Generates docker/caddy/Caddyfile for the aws-ec2 target.
   # Silently skips if no domain is configured (DOMAIN_BASE env var or stack.yaml).
-  local out base email sub_litellm sub_langfuse sub_librechat
+  local out base email tls tls_line sub_litellm sub_langfuse sub_librechat
   base="${DOMAIN_BASE:-$(qs ".targets.\"aws-ec2\".domain.base" 2>/dev/null || true)}"
   [ -n "$base" ] || return 0
 
   email="${DOMAIN_SSL_EMAIL:-$(qs ".targets.\"aws-ec2\".domain.ssl_email" 2>/dev/null || true)}"
+  tls="${DOMAIN_TLS:-$(qs ".targets.\"aws-ec2\".domain.tls" 2>/dev/null || true)}"
+  tls_line=""
+  case "$tls" in
+    ""|letsencrypt) ;;
+    origin-ca)
+      # Cloudflare Origin CA certificate, mounted read-only from docker/caddy/certs/ (docker-compose.yml).
+      tls_line='    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key\n'
+      for f in origin.pem origin.key; do
+        [ -f "$REPO_ROOT/docker/caddy/certs/$f" ] || warn "domain.tls=origin-ca but docker/caddy/certs/$f is missing — Caddy will fail to start"
+      done ;;
+    *) die "unknown domain.tls '$tls' (use \"\" for Let's Encrypt or origin-ca)" ;;
+  esac
   sub_litellm="$(subdomain_for litellm litellm)"
   sub_langfuse="$(subdomain_for langfuse langfuse)"
   sub_librechat="$(subdomain_for librechat chat)"
@@ -502,13 +514,13 @@ render_caddy() {
     local sub_media
     sub_media="$(subdomain_for media media)"
 
-    printf '%s.%s {\n    reverse_proxy librechat:3080\n    encode gzip\n}\n\n' \
+    printf "%s.%s {\n    reverse_proxy librechat:3080\n    encode gzip\n${tls_line}}\n\n" \
       "$sub_librechat" "$base"
-    printf '%s.%s {\n    reverse_proxy langfuse-web:3000\n    encode gzip\n}\n\n' \
+    printf "%s.%s {\n    reverse_proxy langfuse-web:3000\n    encode gzip\n${tls_line}}\n\n" \
       "$sub_langfuse" "$base"
-    printf '%s.%s {\n    reverse_proxy litellm:4000\n    encode gzip\n}\n\n' \
+    printf "%s.%s {\n    reverse_proxy litellm:4000\n    encode gzip\n${tls_line}}\n\n" \
       "$sub_litellm" "$base"
-    printf '%s.%s {\n    reverse_proxy minio:9000\n    encode gzip\n}\n\n' \
+    printf "%s.%s {\n    reverse_proxy minio:9000\n    encode gzip\n${tls_line}}\n\n" \
       "$sub_media" "$base"
   } > "$out"
 

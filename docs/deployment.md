@@ -152,6 +152,30 @@ Caddy renews them automatically (typically at 30 days remaining). As long as
 the instance is running and reachable on port 80/443, certificates stay current
 indefinitely.
 
+**Behind the Cloudflare proxy (optional, Cloudflare Origin CA):** if the
+subdomains are proxied by Cloudflare (orange cloud), Caddy can serve a
+Cloudflare Origin CA certificate instead of Let's Encrypt. It is free, valid for
+up to 15 years, and needs no renewal — but only Cloudflare trusts it, so the
+subdomains must stay proxied and the zone's SSL/TLS mode must be
+**Full (strict)**. Turning the proxy off makes browsers reject the certificate.
+
+1. Cloudflare dashboard → your zone → **SSL/TLS → Origin Server → Create
+   Certificate**: let Cloudflare generate the key, hostnames `*.example.com`,
+   validity 15 years. The private key is shown once.
+2. On the instance, save the two parts as `docker/caddy/certs/origin.pem` and
+   `docker/caddy/certs/origin.key` (`chmod 600`). `*.pem` and `*.key` are git-ignored.
+3. Set `DOMAIN_TLS=origin-ca` in `.env` (or `targets.aws-ec2.domain.tls:
+   origin-ca` in `stack.yaml`), then render and restart Caddy:
+
+```bash
+./scripts/stack.sh render --target aws-ec2 --profile phase-1
+docker compose --project-name sais --profile proxy -f docker/docker-compose.yml up -d caddy
+```
+
+`render` adds `tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key` to
+every site and warns when either file is missing. Leave `DOMAIN_TLS` empty to
+go back to Let's Encrypt.
+
 ### 3. Provision and bootstrap
 
 ```bash

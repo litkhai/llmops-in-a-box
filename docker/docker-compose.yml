@@ -485,6 +485,7 @@ services:
       - "0.0.0.0:443:443/udp"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/certs:/etc/caddy/certs:ro   # Cloudflare Origin CA cert when domain.tls=origin-ca (never committed: *.pem / *.key are ignored)
       - caddy-data:/data
       - caddy-config:/config
 
